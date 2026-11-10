@@ -41,7 +41,6 @@ Core properties:
 |---|---|
 | **v1** | Scheme DSL, JSON serializer, `guix tofu` extension, single-stage lifecycle (`generate`/`build`/`validate`/`plan`/`apply`/`output`), Guix-value lowering, provider lock management |
 | **v2** | Staged bidirectional orchestration: tofu outputs feeding Guix builds feeding later tofu stages; deferred evaluation; resumable checkpoints |
-| **Later** | Migration of the homelab `infra/` HCL scaffold to tofuix (work in this repository, not in `tofuix`) |
 
 Explicit non-goals for v1:
 
@@ -515,18 +514,8 @@ Execution model:
 - Manual acceptance per release: `examples/` cover a plain cloud-style
   configuration and a lowered-artifact configuration.
 
-## 12. Distribution and homelab integration
 
-- tofuix is a standalone channel; users add it to their channels (and, once
-  published, to `channels-lock.scm`), run `guix pull`, and get `guix tofu`.
-- Development uses the submodule checkout plus
-  `GUIX_EXTENSIONS_PATH=$PWD/modules`.
-- Homelab migration (later, in this repository): re-express `infra/` in
-  Scheme, keep using the Guix provider as an ordinary provider, and record
-  prerequisites (dev.tfrc provider override, SOPS, signing keys) in
-  `infra/README.md` as they apply to tofuix.
-
-## 13. Milestones and acceptance criteria
+## 12. Milestones and acceptance criteria
 
 | Milestone | Deliverable | Acceptance |
 |---|---|---|
@@ -535,7 +524,7 @@ Execution model:
 | **M3** — Guix-value lowering | `lower.scm`, `build` command, package definitions | File-like/package/image arguments plan without realizing; apply builds and embeds exact paths; tool resolution PATH→package fallback works |
 | **M4** — Staged orchestration (v2) | stages, deferred outputs, checkpoints, resumable apply | Transcript use case: tofu-generated SSH key → Guix image → tofu host, resumable across an injected failure |
 
-## 14. Settled design decisions
+## 13. Settled design decisions
 
 All questions raised during planning are resolved:
 
