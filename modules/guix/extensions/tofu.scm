@@ -11,9 +11,11 @@
 
 (define-module (guix extensions tofu)
   #:use-module (ice-9 format)
+  #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-11)
   #:use-module (srfi srfi-13)
   #:use-module (tofuix evaluate)
+  #:use-module (tofuix lower)
   #:use-module (tofuix serializer)
   #:use-module (tofuix workdir)
   #:export (guix-tofu
@@ -30,6 +32,8 @@ Usage: guix tofu COMMAND [OPTIONS] [-- ARGS...]
 
 Commands:
   generate  Evaluate the infrastructure file and print its JSON configuration
+  build     As generate, realize required Guix artifacts, and write the
+            configuration to the working directory
   validate  Generate the configuration, then run `tofu init -backend=false'
             and `tofu validate'
   plan      Generate the configuration, initialize providers, then run
@@ -158,11 +162,125 @@ and the project root."
     (values (tofu-evaluate-file path #:load-path load-path)
             (tofu-project-root path))))
 
+;;;
+;;; Guix integration: store access, lowering, and the packaged tool
+;;; fallback.  Guix modules are resolved lazily so the extension itself
+;;; stays loadable from plain Guile (the test suite).
+;;;
+
+(define %guix-modules (make-hash-table))
+
+(define (find-guix-module name)
+  "Return the Guix module NAME, or #f when it is unavailable."
+  (or (hash-ref %guix-modules name)
+      (let ((module (false-if-exception (resolve-interface name))))
+        (when module
+          (hash-set! %guix-modules name module))
+        module)))
+
+(define (guix-module name)
+  "Return the Guix module NAME or raise a user-facing error."
+  (or (find-guix-module name)
+      (throw 'tofuix-error
+             (format #f "Guix modules are unavailable (cannot resolve ~s); run this command through guix"
+                     name))))
+
+(define (module-ref-or-false module name)
+  "Return the value of NAME in MODULE, or #f when MODULE does not provide
+it."
+  (and module (false-if-exception (module-ref module name))))
+
+(define (guix-binding modules name)
+  "Return the first binding of NAME found in one of MODULES.
+
+Guix moves procedures between modules across versions (for instance
+`run-with-store' lives in (guix store) in 1.5), so bindings are looked up
+across a list of candidate modules instead of assuming one layout."
+  (any (lambda (module-name)
+         (module-ref-or-false (find-guix-module module-name) name))
+       modules))
+
+(define %store #f)
+
+(define (guix-store)
+  "Return the daemon connection, opening it on first use."
+  (or %store
+      (let* ((module (guix-module '(guix store)))
+             (store ((module-ref module 'open-connection))))
+        (set! %store store)
+        store)))
+
+(define* (guix-lowering-context #:key (realize? #f))
+  "Return a lowering context backed by the Guix store.
+
+File-like objects and packages are resolved to store paths.  With
+REALIZE? true, `lowering-context-realize!' builds the derivations the
+lowering computed; otherwise they remain unbuilt (plan semantics)."
+  (let* ((pending '())
+         (file-like? (guix-binding '((guix gexp)) 'file-like?))
+         (package? (guix-binding '((guix packages)) 'package?))
+         (lower-object (guix-binding '((guix gexp)) 'lower-object))
+         (package-derivation (guix-binding '((guix packages)) 'package-derivation))
+         (output-path (guix-binding '((guix derivations)) 'derivation->output-path))
+         (run-with-store (guix-binding '((guix store) (guix monads)) 'run-with-store))
+         (build-derivations (guix-binding '((guix derivations) (guix store)) 'build-derivations)))
+    (define (remember derivation)
+      (set! pending (cons derivation pending)))
+    (make-lowering-context
+     (lambda (value) (and file-like? (file-like? value)))
+     (lambda (value) (and package? (package? value)))
+     (lambda (object)
+       ;; `lower-object' yields either an already-available store path (a
+       ;; string, as for plain-file) or a derivation to build later.
+       (let ((lowered (run-with-store (guix-store) (lower-object object))))
+         (if (string? lowered)
+             lowered
+             (begin (remember lowered) (output-path lowered)))))
+     (lambda (package)
+       (let ((derivation (package-derivation (guix-store) package)))
+         (remember derivation)
+         (output-path derivation)))
+     (lambda ()
+       (when (and realize? (pair? pending))
+         (build-derivations (guix-store) pending)
+         (set! pending '()))))))
+
+(define* (lower-infrastructure configuration #:key (realize? #f))
+  "Lower the Guix values in CONFIGURATION, realizing artifacts when
+REALIZE? is true."
+  (let ((context (guix-lowering-context #:realize? realize?)))
+    (let ((lowered (lower-configuration configuration context)))
+      (lowering-context-realize! context)
+      lowered)))
+
+(define (opentofu-from-store)
+  "Return the tofu executable provided by the channel's opentofu package,
+building the package when needed."
+  (let* ((packages-module (guix-module '(tofuix packages)))
+         (package (module-ref-or-false packages-module 'opentofu))
+         (store (guix-store))
+         (package-derivation (guix-binding '((guix packages)) 'package-derivation))
+         (build-derivations (guix-binding '((guix derivations) (guix store)) 'build-derivations))
+         (output-path (guix-binding '((guix derivations)) 'derivation->output-path))
+         (derivation (package-derivation store package))
+         (built? (build-derivations store (list derivation)))
+         (output (output-path derivation)))
+    (unless built?
+      (throw 'tofuix-error "failed to build the channel's opentofu package"))
+    (string-append output "/bin/tofu")))
+
 (define (resolve-tool tool)
   (or (tofu-find-tool tool)
-      (throw 'tofuix-error
-             (if (string=? tool "tofu")
-                 "the tofu executable is not on PATH; install OpenTofu (the channel's packaged fallback arrives with milestone M3) or pass --tool=terraform"
+      (if (string=? tool "tofu")
+          (catch #t
+            (lambda () (opentofu-from-store))
+            (lambda (key . arguments)
+              (throw 'tofuix-error
+                     (format #f "the tofu executable is not on PATH and could not be provided by the channel's opentofu package: ~a"
+                             (if (eq? key 'tofuix-error)
+                                 (car arguments)
+                                 key)))))
+          (throw 'tofuix-error
                  "the terraform executable is not on PATH; tofuix does not package Terraform"))))
 
 (define (run-after-init program init-arguments arguments workdir)
@@ -182,13 +300,22 @@ and the project root."
     (throw 'tofuix-error
            (format #f "generate does not run a tool; unexpected arguments: ~s" forwarded)))
   (let-values (((configuration root) (load-configuration file chdir load-path)))
-    (display (tofu-configuration->json configuration))
+    (display (tofu-configuration->json (lower-infrastructure configuration)))
     (newline)
     0))
 
 (define (command-build file chdir load-path positionals forwarded)
-  (throw 'tofuix-error
-         "the build command arrives with Guile-value lowering (milestone M3)"))
+  (no-positionals "build" positionals)
+  (unless (null? forwarded)
+    (throw 'tofuix-error
+           (format #f "build does not run a tool; unexpected arguments: ~s" forwarded)))
+  (let-values (((configuration root) (load-configuration file chdir load-path)))
+    (let* ((lowered (lower-infrastructure configuration #:realize? #t))
+           (workdir (tofu-workdir root)))
+      (tofu-write-configuration lowered workdir)
+      (display (tofu-configuration->json lowered))
+      (newline)
+      0)))
 
 (define (command-graph file chdir load-path positionals forwarded)
   (throw 'tofuix-error
@@ -197,9 +324,10 @@ and the project root."
 (define (command-validate file chdir load-path positionals forwarded tool)
   (no-positionals "validate" positionals)
   (let-values (((configuration root) (load-configuration file chdir load-path)))
-    (let ((workdir (tofu-workdir root))
-          (program (resolve-tool tool)))
-      (tofu-write-configuration configuration workdir)
+    (let* ((lowered (lower-infrastructure configuration))
+           (workdir (tofu-workdir root))
+           (program (resolve-tool tool)))
+      (tofu-write-configuration lowered workdir)
       (run-after-init program
                       (list "init" "-backend=false" "-input=false")
                       (append (list "validate") forwarded)
@@ -208,9 +336,10 @@ and the project root."
 (define (command-plan file chdir load-path positionals forwarded tool)
   (no-positionals "plan" positionals)
   (let-values (((configuration root) (load-configuration file chdir load-path)))
-    (let ((workdir (tofu-workdir root))
-          (program (resolve-tool tool)))
-      (tofu-write-configuration configuration workdir)
+    (let* ((lowered (lower-infrastructure configuration))
+           (workdir (tofu-workdir root))
+           (program (resolve-tool tool)))
+      (tofu-write-configuration lowered workdir)
       (run-after-init program
                       (list "init" "-input=false")
                       (append (list "plan") forwarded)
@@ -219,9 +348,10 @@ and the project root."
 (define (command-apply file chdir load-path positionals forwarded tool)
   (no-positionals "apply" positionals)
   (let-values (((configuration root) (load-configuration file chdir load-path)))
-    (let ((workdir (tofu-workdir root))
-          (program (resolve-tool tool)))
-      (tofu-write-configuration configuration workdir)
+    (let* ((lowered (lower-infrastructure configuration #:realize? #t))
+           (workdir (tofu-workdir root))
+           (program (resolve-tool tool)))
+      (tofu-write-configuration lowered workdir)
       (run-after-init program
                       (list "init" "-input=false")
                       (append (list "apply") forwarded)

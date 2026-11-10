@@ -69,11 +69,30 @@ GUIX_EXTENSIONS_PATH=$PWD/modules guix tofu plan -f infrastructure.scm
 
 `guix tofu` evaluates the infrastructure file, writes `.tofuix/main.tf.json`
 next to it, and runs `tofu` — or `terraform` with `--tool=terraform` — in that
-directory.  The provider lock file, state, and provider cache stay untouched
-across regenerations.  Commands: `generate`, `validate` (`tofu init -backend=false`
-and `tofu validate`), `plan`, `apply`, and `output`; unknown options and
-arguments after `--` are forwarded to the tool.  Once tofuix is installed as
-a channel, plain `guix tofu` works without the environment variable.
+directory; when no `tofu` is on `PATH`, it builds the channel's pinned
+`opentofu` package instead.  The provider lock file, state, and provider
+cache stay untouched across regenerations.  Commands: `generate`, `build`
+(also realizes required Guix artifacts), `validate` (`tofu init
+-backend=false` and `tofu validate`), `plan`, `apply`, and `output`; unknown
+options and arguments after `--` are forwarded to the tool.  Once tofuix is
+installed as a channel, plain `guix tofu` works without the environment
+variable.
+
+Guix objects can be used directly as argument values: file-like objects and
+packages are lowered to store paths before serialization, prospective paths
+for `generate`/`plan`/`validate`, realized ones for `build`/`apply`:
+
+```scheme
+(use-modules (tofuix) (guix gexp))
+
+(configuration
+  (resource 'terraform_data 'artifact
+    (input (plain-file "greeting.txt" "hello from tofuix"))))
+```
+
+Builder scripts that use `#$output` belong in modules that do not import
+`(tofuix)`, because the `output` constructor macro shadows the gexp builder
+variable; see `examples/artifact.scm`.
 
 ## Development
 

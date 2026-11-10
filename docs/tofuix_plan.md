@@ -3,10 +3,12 @@
 **Project:** `tofuix`, developed in the `./tofuix` git module
 (<https://github.com/Idorobots/tofuix>, already registered as a submodule).
 **Command:** `guix tofu`, delivered as a Guix channel extension.
-**Status:** M1 and M2 implemented — Scheme DSL, JSON serializer, 128 SRFI-64
-tests, the `examples/tls.scm` golden example, and the `guix tofu` extension
-(`generate`/`validate`/`plan`/`apply`/`output`, working-directory and lock
-management, `--tool` selection). M3 (Guix-value lowering) is next.
+**Status:** M1–M3 implemented — Scheme DSL, JSON serializer, 153 SRFI-64
+tests, the `examples/tls.scm` golden example, the `guix tofu` extension
+(`generate`/`build`/`validate`/`plan`/`apply`/`output`, working-directory and
+lock management, `--tool` selection), Guix-value lowering (file-like objects
+and packages to store paths), and the channel's pinned `opentofu` package
+with PATH → store tool fallback. M4 (staged orchestration) is next.
 
 This plan consolidates the design discussed in the "Design Guix OpenTofu
 Integration" transcript with the decisions taken afterwards.
@@ -123,8 +125,8 @@ tofuix/
 │       ├── serializer.scm   # tree -> .tf.json (guile-json)
 │       ├── evaluate.scm     # load/evaluate infrastructure files
 │       ├── workdir.scm      # working directory and tofu invocation
-│       ├── lower.scm        # Guix-value lowering protocol (M3)
-│       └── packages.scm     # opentofu package definition (M3)
+│       ├── lower.scm        # Guix-value lowering protocol
+│       └── packages.scm     # pinned opentofu package (needs Guix modules)
 ├── tests/                   # SRFI-64 suites; not part of the channel
 ├── examples/                # runnable examples (outside the channel)
 ├── manifest.scm              # development environment
@@ -386,6 +388,23 @@ underlying Guix definitions therefore propagate into new store paths, and
 OpenTofu plans the corresponding infrastructure change — without tofuix
 knowing anything about the provider consuming the path.
 
+Implementation: `(tofuix lower)` is Guix-free — it is a traversal over a
+`<lowering-context>` record carrying type predicates and resolvers, so unit
+tests substitute mocked store objects. The extension builds the real context
+with `lower-object` (file-like objects) and `package-derivation` (packages),
+lazily resolving the Guix modules and the daemon connection, and realizing
+pending derivations only for `apply`/`build`.
+
+Two consequences worth knowing:
+
+- Builder scripts that use `#$output` must live in modules that do **not**
+  import `(tofuix)`: the `output` constructor macro shadows the gexp builder
+  variable. Defining builders in project modules is already the recommended
+  style (section 7.1), and the example does exactly that.
+- `(tofuix packages)` installs the upstream OpenTofu release binary, pinned
+  per architecture, because a source build would need the full Go module
+  graph. It is the fallback when no `tofu` is on `PATH`.
+
 ### 7.1 Named Guix values: module references instead of objects
 
 Store paths are the only provider-neutral currency for build artifacts, but
@@ -425,7 +444,7 @@ boundary **by name**, as canonical Guile module references:
 | Command | Purpose |
 |---|---|
 | `guix tofu generate -f infra.scm` | Evaluate and serialize; print/emit JSON; no builds |
-| `guix tofu build -f infra.scm` | As `generate`, plus realize required Guix artifacts (M3) |
+| `guix tofu build -f infra.scm` | As `generate`, plus realize required Guix artifacts |
 | `guix tofu validate -f infra.scm` | `tofu init -backend=false` + `tofu validate` |
 | `guix tofu plan -f infra.scm` | Dry-run semantics; generate, realize nothing, `tofu plan` |
 | `guix tofu apply -f infra.scm` | Realize artifacts, then `tofu apply` |

@@ -28,7 +28,12 @@ jobs:
           GUILE_AUTO_COMPILE: "0"
         run: |
           guild="$(command -v guild || command -v guild-3.0)"
-          for file in modules/tofuix/*.scm modules/tofuix.scm modules/guix/extensions/*.scm examples/*.scm; do
+          echo "compiling pure modules (packages.scm needs Guix and is not compiled here)"
+          for file in modules/tofuix/records.scm modules/tofuix/expressions.scm \
+                      modules/tofuix/serializer.scm modules/tofuix/evaluate.scm \
+                      modules/tofuix/workdir.scm modules/tofuix/lower.scm \
+                      modules/tofuix.scm modules/guix/extensions/tofu.scm \
+                      examples/tls.scm; do
             echo "compiling $file"
             "$guild" compile -L modules -L . "$file"
           done

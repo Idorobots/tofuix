@@ -22,6 +22,14 @@
    (call-with-input-file "tests/tls.golden.json" get-string-all)
    #\newline))
 
+(define (make-temp-directory)
+  (mkdtemp "/tmp/tofuix-cli-XXXXXX"))
+
+(define (write-file file text)
+  (call-with-output-file file
+    (lambda (port)
+      (display text port))))
+
 (test-begin "cli")
 
 (let-values (((command options positionals forwarded)
@@ -91,6 +99,26 @@
   (test-equal "generate prints the configuration followed by a newline"
     (string-append golden "\n")
     output))
+
+(let* ((directory (make-temp-directory))
+       (file (in-vicinity directory "infrastructure.scm"))
+       (status #f)
+       (output #f))
+  (write-file file "\
+(use-modules (tofuix))
+
+(configuration (resource 'terraform_data 'example (input \"built\")))
+")
+  (set! output
+        (with-output-to-string
+          (lambda ()
+            (set! status (tofu-main (list "build" "-C" directory))))))
+  (test-equal "build succeeds without lowerable values" 0 status)
+  (test-equal "build writes the configuration to the working directory"
+    (string-append output "")
+    (call-with-input-file (in-vicinity directory ".tofuix/main.tf.json")
+      get-string-all))
+  (system* "rm" "-rf" directory))
 
 (test-end "cli")
 
