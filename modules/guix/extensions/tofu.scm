@@ -43,7 +43,7 @@ Options:
   -f, --file=FILE       Infrastructure file (default: infrastructure.scm)
   -L, --load-path=DIR   Prepend DIR to the Guile load path (repeatable)
       --tool=NAME       Tool to run: tofu (default) or terraform
-  -chdir=DIR            Run as if started in DIR
+  -C, --chdir=DIR       Run as if started in DIR
   -h, --help            Show this help
 
 Arguments after -- are forwarded to the underlying tool, as are unknown
@@ -117,13 +117,18 @@ arguments, and the arguments FORWARDED to the underlying tool."
      ((string-prefix? "--tool=" (car rest))
       (loop (cdr rest) command file load-path (substring (car rest) 7) chdir help positionals forwarded))
 
-     ((string=? (car rest) "-chdir")
+     ((string=? (car rest) "-C")
       (if (null? (cdr rest))
-          (missing "-chdir")
+          (missing "-C")
           (loop (cddr rest) command file load-path tool (cadr rest) help positionals forwarded)))
 
-     ((string-prefix? "-chdir=" (car rest))
-      (loop (cdr rest) command file load-path tool (substring (car rest) 7) help positionals forwarded))
+     ((string=? (car rest) "--chdir")
+      (if (null? (cdr rest))
+          (missing "--chdir")
+          (loop (cddr rest) command file load-path tool (cadr rest) help positionals forwarded)))
+
+     ((string-prefix? "--chdir=" (car rest))
+      (loop (cdr rest) command file load-path tool (substring (car rest) 8) help positionals forwarded))
 
      ((string-prefix? "-" (car rest))
       (loop (cdr rest) command file load-path tool chdir help positionals

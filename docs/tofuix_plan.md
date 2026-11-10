@@ -440,7 +440,7 @@ Common options:
   the load path when evaluating the infrastructure file — this is how
   project and channel modules such as `(hosts rpi3)` become loadable in the
   tofuix session (section 7.1);
-- `--tool=tofu|terraform`, `-chdir`, `--`;
+- `--tool=tofu|terraform`, `-C`/`--chdir`, `--`;
 - pass-through arguments forwarded to the underlying tofu command
   (e.g. `-target`, `-var`). `-L` is consumed by tofuix itself, not
   forwarded.

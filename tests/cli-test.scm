@@ -36,12 +36,12 @@
 (let-values (((command options positionals forwarded)
               (tofu-parse-arguments
                '("plan" "-f" "x.scm" "-L" "a" "-L" "b" "--tool=terraform"
-                 "-chdir=dir" "-target=x" "--" "-var" "a=b"))))
+                 "-C" "dir" "-target=x" "--" "-var" "a=b"))))
   (test-equal "options around the command are parsed" "plan" command)
   (test-equal "-f sets the file" "x.scm" (option options 'file))
   (test-equal "-L accumulates in order" '("a" "b") (option options 'load-path))
   (test-equal "--tool selects the tool" "terraform" (option options 'tool))
-  (test-equal "-chdir selects the directory" "dir" (option options 'chdir))
+  (test-equal "-C selects the directory" "dir" (option options 'chdir))
   (test-equal "unrecognized options and arguments after -- are forwarded"
     '("-target=x" "-var" "a=b")
     forwarded)
@@ -59,8 +59,12 @@
               (option options 'load-path)))
 
 (let-values (((command options positionals forwarded)
-              (tofu-parse-arguments '("apply" "-chdir" "sub"))))
-  (test-equal "-chdir VALUE sets the directory" "sub" (option options 'chdir)))
+              (tofu-parse-arguments '("apply" "--chdir" "sub"))))
+  (test-equal "--chdir VALUE sets the directory" "sub" (option options 'chdir)))
+
+(let-values (((command options positionals forwarded)
+              (tofu-parse-arguments '("plan" "--chdir=dir"))))
+  (test-equal "--chdir=VALUE sets the directory" "dir" (option options 'chdir)))
 
 (let-values (((command options positionals forwarded)
               (tofu-parse-arguments '("plan" "--help"))))
@@ -72,6 +76,10 @@
   (tofu-parse-arguments '("plan" "--tool")))
 (test-error "an unknown tool is an error" 'tofuix-error
   (tofu-parse-arguments '("plan" "--tool=pulumi")))
+(test-error "-C without a value is an error" 'tofuix-error
+  (tofu-parse-arguments '("plan" "-C")))
+(test-error "--chdir without a value is an error" 'tofuix-error
+  (tofu-parse-arguments '("plan" "--chdir")))
 
 (let ((status #f)
       (output #f))
