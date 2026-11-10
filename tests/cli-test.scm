@@ -86,9 +86,9 @@
   (set! output
         (with-output-to-string
           (lambda ()
-            (set! status (tofu-main '("eval" "-f" "examples/tls.scm"))))))
-  (test-equal "eval succeeds" 0 status)
-  (test-equal "eval prints the configuration followed by a newline"
+            (set! status (tofu-main '("generate" "-f" "examples/tls.scm"))))))
+  (test-equal "generate succeeds" 0 status)
+  (test-equal "generate prints the configuration followed by a newline"
     (string-append golden "\n")
     output))
 

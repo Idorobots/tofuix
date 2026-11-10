@@ -29,8 +29,8 @@
 Usage: guix tofu COMMAND [OPTIONS] [-- ARGS...]
 
 Commands:
-  eval      Evaluate the infrastructure file and print its JSON configuration
-  check     Generate the configuration, then run `tofu init -backend=false'
+  generate  Evaluate the infrastructure file and print its JSON configuration
+  validate  Generate the configuration, then run `tofu init -backend=false'
             and `tofu validate'
   plan      Generate the configuration, initialize providers, then run
             `tofu plan'
@@ -176,11 +176,11 @@ and the project root."
     (throw 'tofuix-error
            (format #f "~a takes no positional arguments: ~s" command positionals))))
 
-(define (command-eval file chdir load-path positionals forwarded)
-  (no-positionals "eval" positionals)
+(define (command-generate file chdir load-path positionals forwarded)
+  (no-positionals "generate" positionals)
   (unless (null? forwarded)
     (throw 'tofuix-error
-           (format #f "eval does not run a tool; unexpected arguments: ~s" forwarded)))
+           (format #f "generate does not run a tool; unexpected arguments: ~s" forwarded)))
   (let-values (((configuration root) (load-configuration file chdir load-path)))
     (display (tofu-configuration->json configuration))
     (newline)
@@ -194,8 +194,8 @@ and the project root."
   (throw 'tofuix-error
          "the graph command is not implemented yet"))
 
-(define (command-check file chdir load-path positionals forwarded tool)
-  (no-positionals "check" positionals)
+(define (command-validate file chdir load-path positionals forwarded tool)
+  (no-positionals "validate" positionals)
   (let-values (((configuration root) (load-configuration file chdir load-path)))
     (let ((workdir (tofu-workdir root))
           (program (resolve-tool tool)))
@@ -257,12 +257,12 @@ and the project root."
        ((or help (not command) (string=? command "help"))
         (tofu-usage (current-output-port))
         0)
-       ((string=? command "eval")
-        (command-eval file chdir load-path positionals forwarded))
+       ((string=? command "generate")
+        (command-generate file chdir load-path positionals forwarded))
        ((string=? command "build")
         (command-build file chdir load-path positionals forwarded))
-       ((string=? command "check")
-        (command-check file chdir load-path positionals forwarded tool))
+       ((string=? command "validate")
+        (command-validate file chdir load-path positionals forwarded tool))
        ((string=? command "plan")
         (command-plan file chdir load-path positionals forwarded tool))
        ((string=? command "apply")

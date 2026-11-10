@@ -5,7 +5,7 @@
 **Command:** `guix tofu`, delivered as a Guix channel extension.
 **Status:** M1 and M2 implemented — Scheme DSL, JSON serializer, 128 SRFI-64
 tests, the `examples/tls.scm` golden example, and the `guix tofu` extension
-(`eval`/`check`/`plan`/`apply`/`output`, working-directory and lock
+(`generate`/`validate`/`plan`/`apply`/`output`, working-directory and lock
 management, `--tool` selection). M3 (Guix-value lowering) is next.
 
 This plan consolidates the design discussed in the "Design Guix OpenTofu
@@ -39,7 +39,7 @@ Core properties:
 
 | Version | Contents |
 |---|---|
-| **v1** | Scheme DSL, JSON serializer, `guix tofu` extension, single-stage lifecycle (`eval`/`build`/`check`/`plan`/`apply`/`output`), Guix-value lowering, provider lock management |
+| **v1** | Scheme DSL, JSON serializer, `guix tofu` extension, single-stage lifecycle (`generate`/`build`/`validate`/`plan`/`apply`/`output`), Guix-value lowering, provider lock management |
 | **v2** | Staged bidirectional orchestration: tofu outputs feeding Guix builds feeding later tofu stages; deferred evaluation; resumable checkpoints |
 | **Later** | Migration of the homelab `infra/` HCL scaffold to tofuix (work in this repository, not in `tofuix`) |
 
@@ -425,9 +425,9 @@ boundary **by name**, as canonical Guile module references:
 
 | Command | Purpose |
 |---|---|
-| `guix tofu eval -f infra.scm` | Evaluate and serialize; print/emit JSON; no builds |
-| `guix tofu build -f infra.scm` | As `eval`, plus realize required Guix artifacts (M3) |
-| `guix tofu check -f infra.scm` | `tofu init -backend=false` + `tofu validate` |
+| `guix tofu generate -f infra.scm` | Evaluate and serialize; print/emit JSON; no builds |
+| `guix tofu build -f infra.scm` | As `generate`, plus realize required Guix artifacts (M3) |
+| `guix tofu validate -f infra.scm` | `tofu init -backend=false` + `tofu validate` |
 | `guix tofu plan -f infra.scm` | Dry-run semantics; generate, realize nothing, `tofu plan` |
 | `guix tofu apply -f infra.scm` | Realize artifacts, then `tofu apply` |
 | `guix tofu output [-f infra.scm] [NAME]` | Read outputs (`tofu output -json` / `-raw`) |
@@ -531,7 +531,7 @@ Execution model:
 | Milestone | Deliverable | Acceptance |
 |---|---|---|
 | **M1** — DSL + serializer | `(tofuix records|expressions|serializer)` with constructor macros, unit tests, example config | Example Scheme serializes to byte-exact expected JSON; constructor macros expand to the same `tofu-`-prefixed records as the programmatic API; `attribute` chains and `ref` escapes serialize correctly; duplicate resources error |
-| **M2** — Extension + lifecycle | `guix tofu` entry point, working dir, `eval`/`check`/`plan`/`apply`/`output`, lock preservation | `tls` example plans and applies through `guix tofu`; lock file survives regeneration; `--tool=terraform` works |
+| **M2** — Extension + lifecycle | `guix tofu` entry point, working dir, `generate`/`validate`/`plan`/`apply`/`output`, lock preservation | `tls` example plans and applies through `guix tofu`; lock file survives regeneration; `--tool=terraform` works |
 | **M3** — Guix-value lowering | `lower.scm`, `build` command, package definitions | File-like/package/image arguments plan without realizing; apply builds and embeds exact paths; tool resolution PATH→package fallback works |
 | **M4** — Staged orchestration (v2) | stages, deferred outputs, checkpoints, resumable apply | Transcript use case: tofu-generated SSH key → Guix image → tofu host, resumable across an injected failure |
 
