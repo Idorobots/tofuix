@@ -1,0 +1,22 @@
+{
+  "output": {
+    "public-key": {
+      "value": "${tls_private_key.deploy.public_key_openssh}"
+    }
+  },
+  "resource": {
+    "tls_private_key": {
+      "deploy": {
+        "algorithm": "ED25519"
+      }
+    }
+  },
+  "terraform": {
+    "required_providers": {
+      "tls": {
+        "source": "hashicorp/tls",
+        "version": "~> 4.0"
+      }
+    }
+  }
+}
