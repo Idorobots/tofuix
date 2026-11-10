@@ -1,18 +1,26 @@
 # tofuix --- OpenTofu infrastructure in Guile Scheme
 
-GUILE ?= guile
-GUILE_FLAGS ?= --no-auto-compile -L modules -L .
+GUIX ?= guix
+GUIX_LOAD_FLAGS ?=
+GUILE_AUTO_COMPILE ?= 0
+export GUILE_AUTO_COMPILE
+GUIX_REPL_FLAGS := -L modules -L . $(GUIX_LOAD_FLAGS)
 
-TESTS = $(sort $(wildcard tests/*-test.scm))
+UNIT_TESTS := $(sort $(wildcard tests/*-test.scm))
+RUNTIME_TESTS := $(sort $(wildcard tests/runtime/*.scm))
 
-.PHONY: check
+.PHONY: check check-runtime
 
 check:
-	@status=0; \
-	for test in $(TESTS); do \
+	@set -eu; for test in $(UNIT_TESTS); do \
 	  echo "RUN $$test"; \
-	  $(GUILE) $(GUILE_FLAGS) $$test || status=1; \
-	done; \
-	if [ $$status -eq 0 ]; then echo "All tests passed."; \
-	else echo "Some tests failed."; fi; \
-	exit $$status
+	  $(GUIX) repl $(GUIX_REPL_FLAGS) "$$test"; \
+	done
+	@echo "All unit tests passed."
+
+check-runtime:
+	@set -eu; for test in $(RUNTIME_TESTS); do \
+	  echo "RUN $$test"; \
+	  $(GUIX) repl $(GUIX_REPL_FLAGS) "$$test"; \
+	done
+	@echo "All runtime checks passed."

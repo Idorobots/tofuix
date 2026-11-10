@@ -1,2 +1,7 @@
-* =guix tofu verify=
+* CANCELLED =guix tofu verify=
+:LOGBOOK:
+- State "CANCELLED"  from              [2026-11-10 Tue 23:21] \\
+  Just renamed the originals.
+:END:
 Let's combine the `eval` and `check` subcommands into a single `verify` subcommand that effectively performs terraform init followed by terraform verify.
+* Overengineered Guix value lowering

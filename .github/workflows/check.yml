@@ -1,0 +1,38 @@
+name: Channel checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: channel-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      GUILE_AUTO_COMPILE: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install Guix
+        uses: PromyLOPh/guix-install-action@40615e98e5c16a451aec10fe01c214ed07cbaa77 # v1
+        with:
+          pullAfterInstall: false
+      - name: Generate the exact-commit CI channel list
+        run: guix repl ci/channels.scm > channels-ci.scm
+      - name: Bootstrap pinned dependencies and this exact channel commit
+        run: guix time-machine -C channels-ci.scm -- describe -f channels
+      - name: Run the test suites
+        run: make check GUIX='guix time-machine -C channels-ci.scm --'
+      - name: Run the store-dependent checks
+        run: make check-runtime GUIX='guix time-machine -C channels-ci.scm --'

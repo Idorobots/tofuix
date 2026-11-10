@@ -3,12 +3,14 @@
 **Project:** `tofuix`, developed in the `./tofuix` git module
 (<https://github.com/Idorobots/tofuix>, already registered as a submodule).
 **Command:** `guix tofu`, delivered as a Guix channel extension.
-**Status:** M1–M3 implemented — Scheme DSL, JSON serializer, 153 SRFI-64
-tests, the `examples/tls.scm` golden example, the `guix tofu` extension
-(`generate`/`build`/`validate`/`plan`/`apply`/`output`, working-directory and
-lock management, `--tool` selection), Guix-value lowering (file-like objects
-and packages to store paths), and the channel's pinned `opentofu` package
-with PATH → store tool fallback. M4 (staged orchestration) is next.
+**Status:** M1–M3 implemented — Scheme DSL, JSON serializer, 133 SRFI-64
+unit tests plus store-dependent runtime checks, the `examples/tls.scm` golden
+example, the `guix tofu` extension (`generate`/`build`/`validate`/`plan`/
+`apply`/`output`, working-directory and lock management, `--tool` selection),
+Guix-value lowering (file-like objects and packages to store paths), and the
+channel's pinned `opentofu` package with PATH → store tool fallback. Tests run
+under Guix, and CI pins channels like `spartan-guix` does. M4 (staged
+orchestration) is next.
 
 This plan consolidates the design discussed in the "Design Guix OpenTofu
 Integration" transcript with the decisions taken afterwards.
@@ -125,12 +127,13 @@ tofuix/
 │       ├── serializer.scm   # tree -> .tf.json (guile-json)
 │       ├── evaluate.scm     # load/evaluate infrastructure files
 │       ├── workdir.scm      # working directory and tofu invocation
-│       ├── lower.scm        # Guix-value lowering protocol
-│       └── packages.scm     # pinned opentofu package (needs Guix modules)
+│       ├── lower.scm        # Guix-value lowering
+│       └── packages.scm     # pinned opentofu package
 ├── tests/                   # SRFI-64 suites; not part of the channel
+│   └── runtime/             # store-dependent checks (make check-runtime)
 ├── examples/                # runnable examples (outside the channel)
-├── manifest.scm              # development environment
-├── Makefile                  # check / examples targets
+├── ci/channels.scm          # exact-commit channel list for CI
+├── Makefile                 # check / check-runtime targets
 └── README.md
 ```
 
@@ -364,7 +367,8 @@ every array to a vector and the empty array to `#()`.  Output bytes are
 pinned by the `tests/tls.golden.json` fixture.
 
 `guile-json` is a runtime dependency: it is part of any Guix installation
-(Guix itself uses it), and `manifest.scm` lists it for development.
+(Guix itself uses it), and the test suites run under `guix repl`, where it is
+always available.
 
 ## 7. Guix-value lowering
 
@@ -388,12 +392,13 @@ underlying Guix definitions therefore propagate into new store paths, and
 OpenTofu plans the corresponding infrastructure change — without tofuix
 knowing anything about the provider consuming the path.
 
-Implementation: `(tofuix lower)` is Guix-free — it is a traversal over a
-`<lowering-context>` record carrying type predicates and resolvers, so unit
-tests substitute mocked store objects. The extension builds the real context
-with `lower-object` (file-like objects) and `package-derivation` (packages),
-lazily resolving the Guix modules and the daemon connection, and realizing
-pending derivations only for `apply`/`build`.
+Implementation: `(tofuix lower)` imports `(guix store)`, `(guix gexp)`,
+`(guix packages)`, and `(guix derivations)` directly and works on a real
+store. `lower-value` computes file-like objects with `lower-object` and
+packages with `package-derivation`; `lower-configuration` collects the
+derivations involved and, with `#:realize? #t`, builds them before returning
+— so `generate`/`validate`/`plan` leave artifacts prospective while
+`build`/`apply` realize them. The store connection is opened on first use.
 
 Two consequences worth knowing:
 
@@ -522,14 +527,20 @@ Execution model:
 
 ## 11. Testing strategy
 
+- Tests run under Guix, as in `spartan-guix`: the Makefile invokes
+  `guix repl -L modules -L .` for each suite, so Guix modules are always
+  available and no separate test environment is needed.
 - Unit tests (SRFI-64, `tests/`): records construction and merge rules;
   expression serialization; serializer output fixtures (golden JSON);
-  lowering dispatch with mocked store objects.
-- Integration tests: examples run against the `local` Terraform backend and
-  providers that need no cloud credentials (e.g. `tls`, `local`).
-- Runner: a plain Makefile-based runner is the standard — `make check`
-  executes each SRFI-64 suite directly (e.g. `guile -L modules -L tests
-  tests/NAME.scm`); `guix test` is not used.
+  evaluation, working-directory, CLI, and lowering-free cases.
+- Store-dependent checks (`tests/runtime/`): lowering against the real store
+  — `plain-file` import, prospective `computed-file` paths, realization,
+  package paths, and reference preservation. Run with `make check-runtime`
+  (needs a daemon).
+- `guix test` is not used.
+- CI follows `spartan-guix`: install Guix, emit an exact-commit channel list
+  from `ci/channels.scm`, bootstrap it with `guix time-machine`, then run
+  `make check` and `make check-runtime` against the pinned channel.
 - Manual acceptance per release: `examples/` cover a plain cloud-style
   configuration and a lowered-artifact configuration.
 

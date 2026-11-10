@@ -96,10 +96,16 @@ variable; see `examples/artifact.scm`.
 
 ## Development
 
+The test suites run under Guix, as in `spartan-guix`:
+
 ```sh
-make check                       # run the SRFI-64 test suites
-guix shell -m manifest.scm -- make check
+make check          # SRFI-64 unit suites (guix repl)
+make check-runtime  # store-dependent lowering checks (needs a daemon)
 ```
+
+CI installs Guix, emits an exact-commit channel list from `ci/channels.scm`,
+bootstraps it with `guix time-machine`, and runs both targets against the
+pinned channel.
 
 Load path for interactive use and examples:
 
