@@ -57,6 +57,24 @@ reference. Nested blocks use `(obj 'key value ...)` or plain association
 lists; lists become JSON arrays. Guix values (file-like objects, packages,
 images) are lowered to store paths.
 
+## Running
+
+During development, put the channel's `modules/` directory on Guix's
+extension search path:
+
+```sh
+GUIX_EXTENSIONS_PATH=$PWD/modules guix tofu eval -f examples/tls.scm
+GUIX_EXTENSIONS_PATH=$PWD/modules guix tofu plan -f infrastructure.scm
+```
+
+`guix tofu` evaluates the infrastructure file, writes `.tofuix/main.tf.json`
+next to it, and runs `tofu` — or `terraform` with `--tool=terraform` — in that
+directory.  The provider lock file, state, and provider cache stay untouched
+across regenerations.  Commands: `eval`, `check` (`tofu init -backend=false`
+and `tofu validate`), `plan`, `apply`, and `output`; unknown options and
+arguments after `--` are forwarded to the tool.  Once tofuix is installed as
+a channel, plain `guix tofu` works without the environment variable.
+
 ## Development
 
 ```sh

@@ -3,9 +3,10 @@
 **Project:** `tofuix`, developed in the `./tofuix` git module
 (<https://github.com/Idorobots/tofuix>, already registered as a submodule).
 **Command:** `guix tofu`, delivered as a Guix channel extension.
-**Status:** M1 implemented — Scheme DSL, JSON serializer, 72 SRFI-64 tests
-and the `examples/tls.scm` golden example. M2 (the `guix tofu` extension)
-is next.
+**Status:** M1 and M2 implemented — Scheme DSL, JSON serializer, 128 SRFI-64
+tests, the `examples/tls.scm` golden example, and the `guix tofu` extension
+(`eval`/`check`/`plan`/`apply`/`output`, working-directory and lock
+management, `--tool` selection). M3 (Guix-value lowering) is next.
 
 This plan consolidates the design discussed in the "Design Guix OpenTofu
 Integration" transcript with the decisions taken afterwards.
@@ -121,10 +122,10 @@ tofuix/
 │       ├── records.scm      # configuration/resource/provider/variable/output
 │       ├── expressions.scm  # OpenTofu expression AST (ref, ...)
 │       ├── serializer.scm   # tree -> .tf.json (guile-json)
-│       ├── lower.scm        # Guix-value lowering protocol
 │       ├── evaluate.scm     # load/evaluate infrastructure files
 │       ├── workdir.scm      # working directory and tofu invocation
-│       └── packages.scm     # opentofu (and terraform) package definitions
+│       ├── lower.scm        # Guix-value lowering protocol (M3)
+│       └── packages.scm     # opentofu package definition (M3)
 ├── tests/                   # SRFI-64 suites; not part of the channel
 ├── examples/                # runnable examples (outside the channel)
 ├── manifest.scm              # development environment
@@ -425,12 +426,12 @@ boundary **by name**, as canonical Guile module references:
 | Command | Purpose |
 |---|---|
 | `guix tofu eval -f infra.scm` | Evaluate and serialize; print/emit JSON; no builds |
-| `guix tofu build -f infra.scm` | As `eval`, plus realize required Guix artifacts |
+| `guix tofu build -f infra.scm` | As `eval`, plus realize required Guix artifacts (M3) |
 | `guix tofu check -f infra.scm` | `tofu init -backend=false` + `tofu validate` |
 | `guix tofu plan -f infra.scm` | Dry-run semantics; generate, realize nothing, `tofu plan` |
 | `guix tofu apply -f infra.scm` | Realize artifacts, then `tofu apply` |
 | `guix tofu output [-f infra.scm] [NAME]` | Read outputs (`tofu output -json` / `-raw`) |
-| `guix tofu graph -f infra.scm` | Print the resource/stage dependency graph |
+| `guix tofu graph -f infra.scm` | Print the resource/stage dependency graph (later milestone) |
 
 Common options:
 
@@ -533,7 +534,6 @@ Execution model:
 | **M2** — Extension + lifecycle | `guix tofu` entry point, working dir, `eval`/`check`/`plan`/`apply`/`output`, lock preservation | `tls` example plans and applies through `guix tofu`; lock file survives regeneration; `--tool=terraform` works |
 | **M3** — Guix-value lowering | `lower.scm`, `build` command, package definitions | File-like/package/image arguments plan without realizing; apply builds and embeds exact paths; tool resolution PATH→package fallback works |
 | **M4** — Staged orchestration (v2) | stages, deferred outputs, checkpoints, resumable apply | Transcript use case: tofu-generated SSH key → Guix image → tofu host, resumable across an injected failure |
-| **M5** — Homelab migration | `infra/` expressed in Scheme | Pi 3 image/host scaffold behavior preserved under tofuix |
 
 ## 14. Settled design decisions
 

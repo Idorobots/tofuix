@@ -1,0 +1,2 @@
+* =guix tofu verify=
+Let's combine the `eval` and `check` subcommands into a single `verify` subcommand that effectively performs terraform init followed by terraform verify.
