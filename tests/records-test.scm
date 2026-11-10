@@ -107,13 +107,13 @@
 (test-error "obj rejects invalid keys" #t
   (obj 1 2))
 
-(test-equal "multi-value tuple becomes a list"
-  '(("tags" . ("a" "b")))
+(test-equal "multi-value tuple becomes a vector"
+  '(("tags" . #("a" "b")))
   (tofu-resource-arguments (resource 'x 'y (tags "a" "b"))))
 
-(test-equal "single list value is evaluated"
-  '(("tags" . ("a" "b")))
-  (tofu-resource-arguments (resource 'x 'y (tags (list "a" "b")))))
+(test-equal "single vector value is evaluated"
+  '(("tags" . #("a" "b")))
+  (tofu-resource-arguments (resource 'x 'y (tags (vector "a" "b")))))
 
 (test-equal "configuration classifies and orders elements"
   '(("tls" "hashicorp/tls")

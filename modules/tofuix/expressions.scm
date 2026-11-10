@@ -7,8 +7,10 @@
 (define-module (tofuix expressions)
   #:use-module (ice-9 format)
   #:use-module (ice-9 match)
+  #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-9)
   #:use-module (srfi srfi-9 gnu)
+  #:use-module (srfi srfi-13)
   #:use-module (tofuix records)
   #:export (tofu-ref
             tofu-ref?
@@ -16,7 +18,12 @@
             tofu-ref->string
             attribute
             ref
-            guile))
+            guile
+            tf
+            untf
+            untf-splicing
+            tf-quote
+            tf-string))
 
 ;;;
 ;;; Values that must remain unevaluated in Scheme and are evaluated by
@@ -106,3 +113,257 @@ Guix value that a provider may evaluate in its own environment."
 (set-record-type-printer! <tofu-ref>
   (lambda (reference port)
     (format port "#<tofu-ref ~a>" (tofu-ref-path reference))))
+
+;;;
+;;; Tofu expressions: a gexp-like language for OpenTofu expressions.
+;;;
+;;; (tf ...) compiles tofu-side code into an HCL expression; (untf value)
+;;; splices a Scheme value, lowered to HCL; (untf-splicing values) splices
+;;; a Scheme list into an argument list.  Lists are applications, except
+;;; under (tf-quote ...), which builds an array literal; (tf-string ...)
+;;; builds a template string from literal and spliced fragments.
+;;;
+;;; Reader shortcuts: #%(...) for tf, #^x for untf, #^@x for
+;;; untf-splicing.  Guix gexps own #~/#$/#+ process-wide, so tofuix uses
+;;; different characters and both can coexist.
+;;;
+
+(define-record-type <tf-untf>
+  (make-tf-untf value)
+  tf-untf?
+  (value tf-untf-value))
+
+(define-record-type <tf-untf-splicing>
+  (make-tf-untf-splicing value)
+  tf-untf-splicing?
+  (value tf-untf-splicing-value))
+
+(define-record-type <tf-quote-form>
+  (make-tf-quote-form values)
+  tf-quote-form?
+  (values tf-quote-form-values))
+
+(define-record-type <tf-string-form>
+  (make-tf-string-form fragments)
+  tf-string-form?
+  (fragments tf-string-form-fragments))
+
+(define* (escape-template-text string #:key (escape-dollar? #f))
+  "Escape STRING for a quoted HCL template: backslash, double quote,
+newline, and tab.  With ESCAPE-DOLLAR? also escape template interpolation
+openers (${ and $${) so the text stays literal."
+  (with-output-to-string
+    (lambda ()
+      (let loop ((index 0))
+        (when (< index (string-length string))
+          (let ((char (string-ref string index)))
+            (cond
+             ((char=? char #\\) (display "\\\\") (loop (+ index 1)))
+             ((char=? char #\") (display "\\\"") (loop (+ index 1)))
+             ((char=? char #\newline) (display "\\n") (loop (+ index 1)))
+             ((char=? char #\tab) (display "\\t") (loop (+ index 1)))
+             ((and escape-dollar?
+                   (char=? char #\$)
+                   (< (+ index 2) (string-length string))
+                   (char=? (string-ref string (+ index 1)) #\$)
+                   (char=? (string-ref string (+ index 2)) #\{))
+              (display "$$$${") (loop (+ index 3)))
+             ((and escape-dollar?
+                   (char=? char #\$)
+                   (< (+ index 1) (string-length string))
+                   (char=? (string-ref string (+ index 1)) #\{))
+              (display "$${") (loop (+ index 2)))
+             (else (display char) (loop (+ index 1))))))))))
+
+(define (hcl-template-text string)
+  (escape-template-text string))
+
+(define (hcl-literal-text string)
+  (escape-template-text string #:escape-dollar? #t))
+
+(define (hcl-string string)
+  "Return STRING as a quoted HCL template string; ${...} interpolates."
+  (string-append "\"" (hcl-template-text string) "\""))
+
+(define (hcl-literal string)
+  "Return STRING as a quoted HCL string where ${...} stays literal."
+  (string-append "\"" (hcl-literal-text string) "\""))
+
+(define (hcl-array elements)
+  (if (null? elements)
+      "[]"
+      (string-append "[ " (string-join elements ", ") " ]")))
+
+(define (hcl-object-map entries)
+  (if (null? entries)
+      "{}"
+      (string-append
+       "{ "
+       (string-join
+        (map (lambda (entry)
+               (format #f "~s = ~a"
+                       (tofu-key->string (car entry))
+                       (host->hcl (cdr entry))))
+             (sort entries
+                   (lambda (a b)
+                     (string<? (tofu-key->string (car a))
+                               (tofu-key->string (car b))))))
+        ", ")
+       " }")))
+
+(define (host->hcl value)
+  "Lower a Scheme value (the argument of untf) to HCL expression text."
+  (cond
+   ((tofu-ref? value) (tofu-ref-path value))
+   ((or (tofu-resource? value) (tofu-data? value)
+        (tofu-variable? value) (tofu-local? value))
+    (reference-base value))
+   ((string? value) (hcl-literal value))
+   ((boolean? value) (if value "true" "false"))
+   ((number? value) (number->string value))
+   ((symbol? value) (symbol->string value))
+   ((vector? value) (hcl-array (map host->hcl (vector->list value))))
+   ((list? value)
+    (for-each (lambda (entry)
+                (unless (and (pair? entry)
+                             (or (symbol? (car entry)) (string? (car entry))))
+                  (error (format #f
+                                 "tofuix: tf: lists are objects: expected (key . value) entries in ~s; use vectors for arrays"
+                                 value))))
+              value)
+    (hcl-object-map value))
+   (else
+    (error (format #f "tofuix: tf: cannot lower value: ~s" value)))))
+
+(define (tf-argument-parts node)
+  "Return the argument fragments for NODE: one, or several when spliced."
+  (if (tf-untf-splicing? node)
+      (let ((values (tf-untf-splicing-value node)))
+        (unless (list? values)
+          (error (format #f "tofuix: tf: untf-splicing expects a list: ~s"
+                         values)))
+        (map host->hcl values))
+      (list (tf-hcl node))))
+
+(define (tf-quote-parts node)
+  (if (tf-untf-splicing? node)
+      (let ((values (tf-untf-splicing-value node)))
+        (unless (list? values)
+          (error (format #f "tofuix: tf: untf-splicing expects a list: ~s"
+                         values)))
+        (map host->hcl values))
+      (list (tf-hcl node))))
+
+(define (tf-application node)
+  (unless (and (pair? node) (symbol? (car node)))
+    (error (format #f
+                   "tofuix: tf: an application needs a function name, got: ~s"
+                   node)))
+  (format #f "~a(~a)"
+          (symbol->string (car node))
+          (string-join (append-map tf-argument-parts (cdr node)) ", ")))
+
+(define (tf-template-fragment node)
+  (cond
+   ((tf-untf? node)
+    (let ((value (tf-untf-value node)))
+      (cond
+       ((or (tofu-ref? value) (tofu-resource? value) (tofu-data? value)
+            (tofu-variable? value) (tofu-local? value))
+        (string-append "${" (host->hcl value) "}"))
+       ((string? value) (hcl-literal-text value))
+       ((symbol? value) (symbol->string value))
+       ((boolean? value) (if value "true" "false"))
+       ((number? value) (number->string value))
+       (else
+        (error (format #f "tofuix: tf: cannot use value in a template: ~s"
+                       value))))))
+   ((tf-untf-splicing? node)
+    (error "tofuix: tf: untf-splicing is not valid in tf-string"))
+   ((symbol? node) (string-append "${" (symbol->string node) "}"))
+   ((string? node) (hcl-literal-text node))
+   ((boolean? node) (if node "true" "false"))
+   ((number? node) (number->string node))
+   (else (string-append "${" (tf-hcl node) "}"))))
+
+(define (tf-hcl node)
+  "Compile a tf tree NODE to HCL expression text."
+  (cond
+   ((tf-untf? node) (host->hcl (tf-untf-value node)))
+   ((tf-untf-splicing? node)
+    (error "tofuix: tf: untf-splicing is only valid in an argument list"))
+   ((tf-quote-form? node)
+    (hcl-array (append-map tf-quote-parts (tf-quote-form-values node))))
+   ((tf-string-form? node)
+    (string-append "\""
+                   (with-output-to-string
+                     (lambda ()
+                       (for-each (lambda (fragment)
+                                   (display (tf-template-fragment fragment)))
+                                 (tf-string-form-fragments node))))
+                   "\""))
+   ((symbol? node) (symbol->string node))
+   ((string? node) (hcl-string node))
+   ((boolean? node) (if node "true" "false"))
+   ((number? node) (number->string node))
+   ((vector? node) (hcl-array (map host->hcl (vector->list node))))
+   ((list? node) (tf-application node))
+   (else (error (format #f "tofuix: tf: cannot compile: ~s" node)))))
+
+(define (syntax-list stx)
+  "Return the elements of the proper list syntax STX as syntax objects."
+  (syntax-case stx ()
+    (() '())
+    ((first rest ...) (cons #'first (syntax-list #'(rest ...))))))
+
+(define-syntax untf
+  (syntax-rules ()
+    ((_ value) (error "tofuix: untf is only valid inside tf"))))
+
+(define-syntax untf-splicing
+  (syntax-rules ()
+    ((_ value) (error "tofuix: untf-splicing is only valid inside tf"))))
+
+(define-syntax tf-quote
+  (syntax-rules ()
+    ((_ item ...) (error "tofuix: tf-quote is only valid inside tf"))))
+
+(define-syntax tf-string
+  (syntax-rules ()
+    ((_ fragment ...) (error "tofuix: tf-string is only valid inside tf"))))
+
+(define (tf-rewrite expression)
+  "Rewrite a tf body into a runtime expression building the tf tree."
+  (syntax-case expression (untf untf-splicing tf-quote tf-string tf)
+    ((untf value) #`(make-tf-untf #,#'value))
+    ((untf-splicing value) #`(make-tf-untf-splicing #,#'value))
+    ((tf-quote item ...)
+     #`(make-tf-quote-form
+        (list #,@(map tf-rewrite (syntax-list #'(item ...))))))
+    ((tf-string fragment ...)
+     #`(make-tf-string-form
+        (list #,@(map tf-rewrite (syntax-list #'(fragment ...))))))
+    ((tf inner) #`(make-tf-untf (tf #,#'inner)))
+    ((head argument ...)
+     #`(list 'head #,@(map tf-rewrite (syntax-list #'(argument ...)))))
+    (_ #`'#,expression)))
+
+(define-syntax tf
+  (lambda (form)
+    (syntax-case form ()
+      ((_ expression)
+       #`(tofu-ref (tf-hcl #,(tf-rewrite #'expression)))))))
+
+;;; Reader shortcuts.  #~/#$/#+ belong to (guix gexp), so use #%/#^/#^@.
+
+(read-hash-extend #\%
+  (lambda (character port)
+    (list 'tf (read port))))
+
+(read-hash-extend #\^
+  (lambda (character port)
+    (if (eqv? (peek-char port) #\@)
+        (begin
+          (read-char port)
+          (list 'untf-splicing (read port)))
+        (list 'untf (read port)))))

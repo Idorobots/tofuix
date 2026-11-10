@@ -3,14 +3,15 @@
 **Project:** `tofuix`, developed in the `./tofuix` git module
 (<https://github.com/Idorobots/tofuix>, already registered as a submodule).
 **Command:** `guix tofu`, delivered as a Guix channel extension.
-**Status:** M1–M3 implemented — Scheme DSL, JSON serializer, 133 SRFI-64
+**Status:** M1–M3 implemented — Scheme DSL, JSON serializer, 153 SRFI-64
 unit tests plus store-dependent runtime checks, the `examples/tls.scm` golden
 example, the `guix tofu` extension (`generate`/`build`/`validate`/`plan`/
 `apply`/`output`, working-directory and lock management, `--tool` selection),
-Guix-value lowering (file-like objects and packages to store paths), and the
-channel's pinned `opentofu` package with PATH → store tool fallback. Tests run
-under Guix, and CI pins channels like `spartan-guix` does. M4 (staged
-orchestration) is next.
+Guix-value lowering (file-like objects and packages to store paths), the
+channel's pinned `opentofu` package with PATH → store tool fallback, and the
+gexp-like `tf`/`untf`/`untf-splicing` expression layer. Tests run under Guix,
+and CI pins channels like `spartan-guix` does. M4 (staged orchestration) is
+next.
 
 This plan consolidates the design discussed in the "Design Guix OpenTofu
 Integration" transcript with the decisions taken afterwards.
@@ -123,7 +124,7 @@ tofuix/
 │   │       └── tofu.scm     # (guix extensions tofu), entry point guix-tofu
 │   └── tofuix/
 │       ├── records.scm      # configuration/resource/provider/variable/output
-│       ├── expressions.scm  # OpenTofu expression AST (ref, ...)
+│       ├── expressions.scm  # expression AST (ref, attribute, tf, ...)
 │       ├── serializer.scm   # tree -> .tf.json (guile-json)
 │       ├── evaluate.scm     # load/evaluate infrastructure files
 │       ├── workdir.scm      # working directory and tofu invocation
@@ -229,11 +230,12 @@ Rules:
   are ordinary tuples.
 - A tuple with several values serializes to a JSON array:
   `(availability_zones "eu-central-1a" "eu-central-1b")`.
-- Nested structures cannot use tuple sugar unambiguously (a list of tuples
-  could mean a JSON object or an array of objects), so nesting uses plain
-  data, terranix-style: alists and `(obj 'k v ...)` build objects, lists
-  build arrays, e.g.
-  `(create (obj 'content (obj 'url image-path)))`.
+- Nesting uses plain data, and the object/array distinction is structural:
+  association lists (including `(obj 'k v ...)`) build objects, vectors
+  build arrays, e.g. `(create (obj 'content (obj 'url image-path)))`,
+  `(availability_zones (vector "eu-central-1a" "eu-central-1b"))`.
+  Consequently `()` is the empty object (`{}`) and `#()` the empty array
+  (`[]`), and a non-association list is an error.
 - `configuration` takes a flat sequence: each element is a configuration
   object (or a list of them), classified by record type, plus root-level
   tuple blocks such as `(terraform (required_version ">= 1.6"))` and
@@ -274,9 +276,9 @@ Escapes and future growth:
   OpenTofu expression): it serializes to `"(@ (hosts rpi3) rpi3-os)"` — the
   canonical Guile module reference — and is the explicit form of the named
   Guix values described in section 7.1.
-- Helpers for function calls, conditionals, `for` expressions, and string
-  templates are added incrementally as needed, each serializing to its
-  HCL-in-JSON equivalent.
+- Function calls and string templates are provided by the gexp-like `tf`
+  layer (section 5.3); conditionals and `for` expressions can be added to
+  that grammar incrementally, each serializing to its HCL equivalent.
 
 ### 5.2 Nesting: references and blocks
 
@@ -316,7 +318,7 @@ same implicit dependency edge in OpenTofu:
 must still hold.
 
 **Nested blocks are data** (section rules apply at any depth): `obj`/alists
-for single blocks, a list of `obj`s for repeated blocks (security-group
+for single blocks, a vector of `obj`s for repeated blocks (security-group
 `ingress`, etc.) → JSON array of objects. Guix-value lowering (section 7)
 also runs inside nested structures, so file-like objects may be used
 anywhere in the tree.
@@ -345,6 +347,36 @@ Hoisting rules:
   `define`; definitions with `define` remain the recommended style, with
   inline embedding as ergonomics for one-off helper resources.
 
+### 5.3 Tofu expressions: `tf`, `untf`, `untf-splicing`
+
+A gexp-like layer for the cases where a value cannot be plain JSON data:
+function calls, template strings, and expressions mixing Scheme values with
+Terraform-computed ones.  It is the analogue of quasiquote/gexps: inside
+`(tf ...)` the body is tofu-side code; `untf` marks host-side (Scheme)
+values.
+
+| Form | Compiles to |
+|---|---|
+| `(fn arg ...)` | application `fn(arg, …)` |
+| bare symbol | HCL identifier (`path.root`, `true`) |
+| string | HCL template string; `${…}` interpolates |
+| `(untf value)` | lowered Scheme value: reference/record → address; string → quoted literal with `${` escaped; alist → `{ … }`; vector → `[ … ]`; scalars |
+| `(untf-splicing list)` | splices the lowered list elements into an argument list |
+| `(tf-quote expr ...)` | array literal `[ … ]` |
+| `(tf-string fragment ...)` | template string: refs/symbols → `${…}`, strings → literal text |
+
+Reader shortcuts, registered when `(tofuix)` loads (infra files can use them
+after their `use-modules` form): `#%(...)` for `tf`, `#^x` for `untf`, and
+`#^@x` for `untf-splicing`.  Guix gexps own `#~`/`#$`/`#+` process-wide, so
+tofuix uses different characters and both can be used in one process (an
+infrastructure file next to gexp builder modules).  `tf` returns a reference
+that serializes as an interpolation, e.g.
+`#%(jsonencode #^(obj 'name "x"))` → `"${jsonencode({ \"name\" = \"x\" })}"`.
+
+`untf` lowers Scheme *data*, not Guix objects: file-like objects and
+packages stay outside `tf` and are lowered later by the M3 lowering pass.
+
+
 ## 6. Serializer
 
 `serializer.scm` walks the record tree and emits `.tf.json`. The mapping is
@@ -359,12 +391,11 @@ characters below 0x20 are escaped — at the cost of escaping non-ASCII
 characters, which also keeps output byte-stable across locales.
 
 guile-json has no key sorting, so the serializer sorts association lists
-itself.  The object/array distinction also remains explicit: objects are
-association lists, arrays are **vectors**.  A plain list of association
-lists would be mistaken for an object (a one-element array of objects is
-genuinely ambiguous to generic JSON libraries), so `value->scm` converts
-every array to a vector and the empty array to `#()`.  Output bytes are
-pinned by the `tests/tls.golden.json` fixture.
+itself.  The object/array distinction is structural: **association lists are
+objects and vectors are arrays** — `()` serializes to the empty object
+(`{}`) and `#()` to the empty array (`[]`) — so no heuristic is needed and
+there is no ambiguity to resolve.  Output bytes are pinned by the
+`tests/tls.golden.json` fixture.
 
 `guile-json` is a runtime dependency: it is part of any Guix installation
 (Guix itself uses it), and the test suites run under `guix repl`, where it is

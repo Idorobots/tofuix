@@ -22,16 +22,6 @@
 (define (tofu-error format-string . arguments)
   (throw 'tofuix-error (apply format #f format-string arguments)))
 
-(define (alist-like? value)
-  "Return true when VALUE is an association list whose entries all have a
-symbol or string key; this distinguishes objects from arrays, exactly as
-the serializer does."
-  (and (pair? value)
-       (every (lambda (entry)
-                (and (pair? entry)
-                     (or (symbol? (car entry)) (string? (car entry)))))
-              value)))
-
 (define (lower-file-like object store remember)
   "Return the store path for the file-like OBJECT, remembering its
 derivation for realization when it is not available yet."
@@ -62,20 +52,24 @@ would have to be built for the value to be real."
    ;; (package . \"output\") selects a non-default output.
    ((and (pair? value) (package? (car value)) (string? (cdr value)))
     (lower-package (car value) (cdr value) store remember))
-   ((alist-like? value)
-    (map (lambda (entry)
-           (cons (car entry) (lower-value-with (cdr entry) store remember)))
-         value))
-   ((list? value)
-    (map (lambda (element) (lower-value-with element store remember)) value))
    ((vector? value)
     (list->vector (map (lambda (element)
                          (lower-value-with element store remember))
                        (vector->list value))))
+   ((list? value)
+    ;; Lists are objects; vectors are arrays.  An empty list is the empty
+    ;; object.
+    (map (lambda (entry)
+           (unless (and (pair? entry)
+                        (or (symbol? (car entry)) (string? (car entry))))
+             (tofu-error "lists are objects: expected (key . value) entries in ~s; use vectors for arrays"
+                         value))
+           (cons (car entry) (lower-value-with (cdr entry) store remember)))
+         value))
    ((file-like? value) (lower-file-like value store remember))
    ((package? value) (lower-package value "out" store remember))
    (else
-    (tofu-error "cannot lower value: ~s; expected a string, number, boolean, symbol, list or association list, an OpenTofu expression, a file-like object, or a package"
+    (tofu-error "cannot lower value: ~s; expected a string, number, boolean, symbol, association list (object) or vector (array), an OpenTofu expression, a file-like object, or a package"
                 value))))
 
 (define (lower-value value store)

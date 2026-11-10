@@ -311,7 +311,7 @@ into a single configuration, rejecting duplicate identities."
 (define-syntax %tofu-arg-value
   (syntax-rules ()
     ((_ value) value)
-    ((_ value rest ...) (list value rest ...))))
+    ((_ value rest ...) (vector value rest ...))))
 
 (define-syntax resource
   (syntax-rules ()

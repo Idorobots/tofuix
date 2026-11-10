@@ -60,21 +60,52 @@
 (test-equal "arrays keep their order"
   '(("ids" . #(1 2)) ("tags" . #("a" "b")))
   (resource-arguments
-   (configuration (resource 'x 'y (tags "a" "b") (ids (list 1 2))))
+   (configuration (resource 'x 'y (tags "a" "b") (ids (vector 1 2))))
    "x" "y"))
 
-(test-equal "empty lists become empty arrays"
+(test-equal "empty vectors become empty arrays"
   '(("empty" . #()))
+  (resource-arguments
+   (configuration (resource 'x 'y (empty (vector))))
+   "x" "y"))
+
+(test-equal "empty lists become empty objects"
+  '(("empty" . ()))
   (resource-arguments
    (configuration (resource 'x 'y (empty (list))))
    "x" "y"))
+
+(test-equal "a resource with no arguments serializes as an empty object"
+  "{
+  \"resource\": {
+    \"age_secret_key\": {
+      \"pi3\": {}
+    }
+  }
+}"
+  (tofu-configuration->json
+   (configuration (resource 'age_secret_key 'pi3))))
+
+(test-equal "tf expressions serialize as interpolations"
+  "{
+  \"locals\": {
+    \"x\": \"${merge({ \\\"a\\\" = \\\"b\\\" })}\"
+  }
+}"
+  (tofu-configuration->json
+   (configuration (local 'x (tf (merge (untf '((a . "b")))))))))
+
+(test-error "non-association lists are an error"
+  'misc-error
+  (tofu-configuration->json
+   (configuration (resource 'x 'y (values (list "a" "b"))))))
 
 (test-equal "arrays of objects become vectors of association lists"
   '(("ingress" . #((("from_port" . 80)) (("to_port" . 80)))))
   (resource-arguments
    (configuration
     (resource 'aws_security_group 'web
-      (ingress (list (obj 'from_port 80) (obj 'to_port 80)))))
+      (ingress (vector (obj 'from_port 80) (obj 'to_port 80)))))
    "aws_security_group" "web"))
 
 (test-equal "objects nest through obj"
@@ -216,8 +247,8 @@
   (tofu-configuration->json
    (configuration
     (resource 'aws_security_group 'web
-      (ingress (list (obj 'from_port 80)
-                     (obj 'to_port 80)))))))
+      (ingress (vector (obj 'from_port 80)
+                       (obj 'to_port 80)))))))
 
 (test-equal "strings are escaped"
   "{

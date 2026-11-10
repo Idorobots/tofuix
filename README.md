@@ -54,8 +54,18 @@ Resources are first-class Scheme values, so references stay in Scheme:
 `(attribute resource 'name)` yields an unevaluated OpenTofu expression, and a
 resource used directly as an argument value becomes a whole-object
 reference. Nested blocks use `(obj 'key value ...)` or plain association
-lists; lists become JSON arrays. Guix values (file-like objects, packages,
-images) are lowered to store paths.
+lists (objects); vectors are arrays, so `()` is `{}` and `#()` is `[]`.
+Guix values (file-like objects, packages) are lowered to store paths.
+
+When a value needs Terraform functions or mixes Scheme data with
+Terraform-computed values, use the gexp-like expression layer and its
+reader shortcuts (`#%`, `#^`, `#^@` — `#~`/`#$` stay Guix's):
+
+```scheme
+(resource 'terraform_data 'example
+  (input #%(jsonencode #^(obj 'name "x" 'tags (vector "a" "b"))))
+  (triggers_replace (computed-file "artifact" #~(begin (mkdir #$output)))))
+```
 
 ## Running
 

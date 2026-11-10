@@ -194,28 +194,25 @@ to verify that records used as references belong to it."
                       (string=? (tofu-local-name local)
                                 (tofu-local-name value))))
     (string-append "${local." (tofu-local-name value) "}"))
-   ((json-object? value)
+   ((vector? value)
+    (list->vector
+     (map (lambda (element) (value->scm configuration element))
+          (vector->list value))))
+   ((list? value)
+    ;; Lists are objects; vectors are arrays.  An empty list is the empty
+    ;; object, so empty argument lists serialize as {}.
     (sort-alist
      (map (lambda (entry)
+            (unless (and (pair? entry)
+                         (or (symbol? (car entry)) (string? (car entry))))
+              (error (format #f
+                             "tofuix: lists are objects: expected (key . value) entries in ~s; use vectors for arrays"
+                             value)))
             (cons (tofu-key->string (car entry))
                   (value->scm configuration (cdr entry))))
           value)))
-   ((list? value)
-    (list->vector (map (lambda (element)
-                         (value->scm configuration element))
-                       value)))
    (else
     (error (format #f "tofuix: cannot serialize value: ~s" value)))))
-
-(define (json-object? value)
-  "Return true when VALUE is an association list whose entries all have a
-symbol or string key.  This distinguishes objects from arrays of objects
-(whose elements are themselves lists)."
-  (and (pair? value)
-       (every (lambda (entry)
-                (and (pair? entry)
-                     (or (symbol? (car entry)) (string? (car entry)))))
-              value)))
 
 (define (require-member what identity members member?)
   (unless (any member? members)

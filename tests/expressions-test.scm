@@ -68,6 +68,72 @@
 (test-error "attribute rejects invalid steps" #t
   (attribute (variable 'region) 1.5))
 
+(define test-resource (resource 'test_thing 'example (id "value")))
+(define test-ref (attribute test-resource 'id))
+
+(test-equal "tf compiles an application"
+  "merge({ \"a\" = \"b\" })"
+  (tofu-ref-path (tf (merge (untf '((a . "b")))))))
+
+(test-equal "tf nests applications"
+  "jsonencode(sort(tolist([ test_thing.example.id ])))"
+  (tofu-ref-path
+   (tf (jsonencode (sort (tolist (untf (vector test-ref))))))))
+
+(test-equal "tf keeps bare symbols as identifiers"
+  "path.root"
+  (tofu-ref-path (tf path.root)))
+
+(test-equal "tf code strings interpolate"
+  "f(\"a${b}c\")"
+  (tofu-ref-path (tf (f "a${b}c"))))
+
+(test-equal "tf data strings stay literal"
+  "f(\"a$${b}c\")"
+  (tofu-ref-path (tf (f (untf "a${b}c")))))
+
+(test-equal "tf escapes quotes and newlines in data strings"
+  "f(\"a\\nb\")"
+  (tofu-ref-path (tf (f (untf "a\nb")))))
+
+(test-equal "tf splices Scheme lists into argument lists"
+  "f(1, 2)"
+  (tofu-ref-path (tf (f (untf-splicing (list 1 2))))))
+
+(test-equal "tf-quote builds array literals"
+  "toset([ \"a\", \"b\" ])"
+  (tofu-ref-path (tf (toset (tf-quote "a" "b")))))
+
+(test-equal "tf-string builds templates from fragments"
+  "base64encode(\"${path.root}/x\\n\")"
+  (tofu-ref-path (tf (base64encode (tf-string path.root "/x" "\n")))))
+
+(test-equal "tf-string interpolates references"
+  "f(\"${test_thing.example.id}\")"
+  (tofu-ref-path (tf (f (tf-string (untf test-ref))))))
+
+(test-equal "tf lowers empty lists to objects and empty vectors to arrays"
+  "f({}, [])"
+  (tofu-ref-path (tf (f (untf (list)) (untf (vector))))))
+
+(test-equal "tf supports nested tf forms"
+  "f(g(\"x\"))"
+  (tofu-ref-path (tf (f (tf (g (untf "x")))))))
+
+(test-equal "the #%/#^ reader shortcuts work"
+  "merge({ \"a\" = \"b\" }, x)"
+  (tofu-ref-path #%(merge #^'((a . "b")) #^(ref "x"))))
+
+(test-equal "the #^@ reader shortcut splices"
+  "f(1, 2)"
+  (tofu-ref-path #%(f #^@(list 1 2))))
+
+(test-error "untf outside tf is an error" #t
+  (untf 1))
+
+(test-error "tf rejects non-association lists" #t
+  (tf (f (untf (list "a" "b")))))
+
 (test-error "guile requires a module list" #t
   (guile 'hosts 'binding))
 
