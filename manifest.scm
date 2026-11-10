@@ -1,4 +1,5 @@
 (use-modules (guix profiles))
 
 (specifications->manifest
- (list "guile"))
+ (list "guile"
+       "guile-json"))

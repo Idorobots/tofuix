@@ -58,16 +58,24 @@
            "resource"))
 
 (test-equal "arrays keep their order"
-  '(("ids" . (1 2)) ("tags" . ("a" "b")))
+  '(("ids" . #(1 2)) ("tags" . #("a" "b")))
   (resource-arguments
    (configuration (resource 'x 'y (tags "a" "b") (ids (list 1 2))))
    "x" "y"))
 
 (test-equal "empty lists become empty arrays"
-  '(("empty" . ()))
+  '(("empty" . #()))
   (resource-arguments
    (configuration (resource 'x 'y (empty (list))))
    "x" "y"))
+
+(test-equal "arrays of objects become vectors of association lists"
+  '(("ingress" . #((("from_port" . 80)) (("to_port" . 80)))))
+  (resource-arguments
+   (configuration
+    (resource 'aws_security_group 'web
+      (ingress (list (obj 'from_port 80) (obj 'to_port 80)))))
+   "aws_security_group" "web"))
 
 (test-equal "objects nest through obj"
   '(("create" ("content" ("url" . "/gnu/store/example"))))
@@ -219,6 +227,15 @@
 }"
   (tofu-configuration->json
    (configuration (local 's "a\"b\nc\td"))))
+
+(test-equal "control characters are escaped"
+  "{
+  \"locals\": {
+    \"s\": \"a\\u0001\"
+  }
+}"
+  (tofu-configuration->json
+   (configuration (local 's (string #\a (integer->char 1))))))
 
 (test-end "serializer")
 

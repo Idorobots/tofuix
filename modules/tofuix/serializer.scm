@@ -7,21 +7,24 @@
 (define-module (tofuix serializer)
   #:use-module (ice-9 format)
   #:use-module (ice-9 match)
+  #:use-module (json)
   #:use-module (srfi srfi-1)
-  #:use-module (srfi srfi-13)
   #:use-module (tofuix records)
   #:use-module (tofuix expressions)
   #:export (tofu-configuration->scm
             tofu-configuration->json))
 
 ;;;
-;;; JSON-compatible representation.
+;;; JSON-compatible representation: association lists for objects with
+;;; sorted, string keys; vectors for arrays; strings, numbers, and booleans
+;;; for scalars.
 ;;;
 
 (define (tofu-configuration->scm configuration)
-  "Return CONFIGURATION as a JSON-shaped Scheme value: association lists
-for objects (with sorted, string keys), lists for arrays, and scalars for
-primitive values.  Empty configurations return the empty list."
+  "Return CONFIGURATION as a guile-json compatible Scheme value:
+association lists for objects (with sorted, string keys), vectors for
+arrays, and scalars for primitive values.  An empty configuration returns
+the empty list, which serializes to an empty JSON object."
   (let* ((providers (tofu-configuration-providers configuration))
          (variables (tofu-configuration-variables configuration))
          (datas     (tofu-configuration-datas configuration))
@@ -149,7 +152,11 @@ to verify that records used as references belong to it."
    ((string? value) value)
    ((symbol? value) (symbol->string value))
    ((boolean? value) value)
-   ((number? value) value)
+   ((number? value)
+    (if (or (integer? value)
+            (and (inexact? value) (finite? value)))
+        value
+        (error (format #f "tofuix: cannot serialize number: ~s" value))))
    ((tofu-ref? value) (tofu-ref->string value))
    ((tofu-resource? value)
     (let ((identity (string-append (tofu-resource-type value) "."
@@ -187,7 +194,6 @@ to verify that records used as references belong to it."
                       (string=? (tofu-local-name local)
                                 (tofu-local-name value))))
     (string-append "${local." (tofu-local-name value) "}"))
-   ((null? value) '())
    ((json-object? value)
     (sort-alist
      (map (lambda (entry)
@@ -195,7 +201,9 @@ to verify that records used as references belong to it."
                   (value->scm configuration (cdr entry))))
           value)))
    ((list? value)
-    (map (lambda (element) (value->scm configuration element)) value))
+    (list->vector (map (lambda (element)
+                         (value->scm configuration element))
+                       value)))
    (else
     (error (format #f "tofuix: cannot serialize value: ~s" value)))))
 
@@ -216,88 +224,14 @@ symbol or string key.  This distinguishes objects from arrays of objects
                    what identity))))
 
 ;;;
-;;; JSON emitter.
+;;; JSON emission.
 ;;;
 
 (define (tofu-configuration->json configuration)
-  "Serialize CONFIGURATION to a deterministic, pretty-printed JSON string."
-  (let ((scm (tofu-configuration->scm configuration)))
-    (if (null? scm)
-        "{}"
-        (with-output-to-string
-          (lambda ()
-            (emit scm (current-output-port) 0))))))
-
-(define (emit value port depth)
-  (cond
-   ((string? value) (emit-string value port))
-   ((boolean? value) (display (if value "true" "false") port))
-   ((integer? value) (display value port))
-   ((and (real? value) (inexact? value))
-    (display value port))
-   ((number? value)
-    (error (format #f "tofuix: cannot serialize number: ~s" value)))
-   ((null? value) (display "[]" port))
-   ((json-object? value)
-    (emit-object value port depth))
-   ((list? value) (emit-array value port depth))
-   (else
-    (error (format #f "tofuix: cannot serialize value: ~s" value)))))
-
-(define (emit-object alist port depth)
-  (display "{\n" port)
-  (let loop ((entries alist))
-    (match entries
-      (((key . value))
-       (pad port (1+ depth))
-       (emit-string key port)
-       (display ": " port)
-       (emit value port (1+ depth))
-       (display "\n" port))
-      (((key . value) rest ...)
-       (pad port (1+ depth))
-       (emit-string key port)
-       (display ": " port)
-       (emit value port (1+ depth))
-       (display ",\n" port)
-       (loop rest))))
-  (pad port depth)
-  (display "}" port))
-
-(define (emit-array values port depth)
-  (display "[\n" port)
-  (let loop ((values values))
-    (match values
-      ((value)
-       (pad port (1+ depth))
-       (emit value port (1+ depth))
-       (display "\n" port))
-      ((value rest ...)
-       (pad port (1+ depth))
-       (emit value port (1+ depth))
-       (display ",\n" port)
-       (loop rest))))
-  (pad port depth)
-  (display "]" port))
-
-(define (pad port depth)
-  (display (make-string (* 2 depth) #\space) port))
-
-(define (emit-string string port)
-  (display #\" port)
-  (string-for-each
-   (lambda (character)
-     (case character
-       ((#\newline) (display "\\n" port))
-       ((#\return) (display "\\r" port))
-       ((#\tab) (display "\\t" port))
-       ((#\backspace) (display "\\b" port))
-       ((#\page) (display "\\f" port))
-       ((#\") (display "\\\"" port))
-       ((#\\) (display "\\\\" port))
-       (else
-        (if (char<? character #\space)
-            (format port "\\u~4,'0x" (char->integer character))
-            (display character port)))))
-   string)
-  (display #\" port))
+  "Serialize CONFIGURATION to a deterministic, pretty-printed JSON string.
+Non-ASCII characters are escaped (guile-json's #:unicode option) so that
+control characters are always valid JSON and the output is byte-stable
+regardless of the locale."
+  (scm->json-string (tofu-configuration->scm configuration)
+                    #:pretty #t
+                    #:unicode #t))

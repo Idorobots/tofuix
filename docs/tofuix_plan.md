@@ -348,12 +348,21 @@ The serializer is pure: given the same evaluated tree, the JSON is
 deterministic (sorted keys, two-space indentation), which keeps diffs and
 plan churn minimal.
 
-The emitter is a small hand-written one rather than `guile-json`: JSON's
-object/array ambiguity for a one-element array of objects (an alist and a
-list containing an alist are structurally indistinguishable to generic
-libraries) is resolved explicitly by keying on whether every list element is
-a `(key . value)` entry with a symbol or string key. This also pins the exact
-output bytes for golden tests and keeps the project dependency-free.
+Emission uses `guile-json` (`(json)`) with `#:pretty #t` (two-space
+indentation) and `#:unicode #t`.  The latter guarantees valid JSON — control
+characters below 0x20 are escaped — at the cost of escaping non-ASCII
+characters, which also keeps output byte-stable across locales.
+
+guile-json has no key sorting, so the serializer sorts association lists
+itself.  The object/array distinction also remains explicit: objects are
+association lists, arrays are **vectors**.  A plain list of association
+lists would be mistaken for an object (a one-element array of objects is
+genuinely ambiguous to generic JSON libraries), so `value->scm` converts
+every array to a vector and the empty array to `#()`.  Output bytes are
+pinned by the `tests/tls.golden.json` fixture.
+
+`guile-json` is a runtime dependency: it is part of any Guix installation
+(Guix itself uses it), and `manifest.scm` lists it for development.
 
 ## 7. Guix-value lowering
 
