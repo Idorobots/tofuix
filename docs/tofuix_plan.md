@@ -3,7 +3,7 @@
 **Project:** `tofuix`, developed in the `./tofuix` git module
 (<https://github.com/Idorobots/tofuix>, already registered as a submodule).
 **Command:** `guix tofu`, delivered as a Guix channel extension.
-**Status:** M1–M3 implemented — Scheme DSL, JSON serializer, 153 SRFI-64
+**Status:** M1–M3 implemented — Scheme DSL, JSON serializer, 155 SRFI-64
 unit tests plus store-dependent runtime checks, the `examples/tls.scm` golden
 example, the `guix tofu` extension (`generate`/`build`/`validate`/`plan`/
 `apply`/`output`, working-directory and lock management, `--tool` selection),
@@ -362,8 +362,12 @@ values.
 | string | HCL template string; `${…}` interpolates |
 | `(untf value)` | lowered Scheme value: reference/record → address; string → quoted literal with `${` escaped; alist → `{ … }`; vector → `[ … ]`; scalars |
 | `(untf-splicing list)` | splices the lowered list elements into an argument list |
-| `(tf-quote expr ...)` | array literal `[ … ]` |
-| `(tf-string fragment ...)` | template string: refs/symbols → `${…}`, strings → literal text |
+
+Arrays are Scheme vectors inside `untf` (`#^(vector ...)`, empty `#()`,
+`#^(list->vector xs)`).  Because `untf` strings are data, a string element
+that should stay an interpolating template is nested as `(tf "...")`.
+Mixing literal text with values uses OpenTofu's `format`, e.g.
+`#%(base64encode (format "%s\n" #^(attribute key 'secret_key)))`.
 
 Reader shortcuts, registered when `(tofuix)` loads (infra files can use them
 after their `use-modules` form): `#%(...)` for `tf`, `#^x` for `untf`, and

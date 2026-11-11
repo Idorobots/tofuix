@@ -100,17 +100,25 @@
   "f(1, 2)"
   (tofu-ref-path (tf (f (untf-splicing (list 1 2))))))
 
-(test-equal "tf-quote builds array literals"
-  "toset([ \"a\", \"b\" ])"
-  (tofu-ref-path (tf (toset (tf-quote "a" "b")))))
+(test-equal "tf arrays are vectors"
+  "toset([ 1, 2 ])"
+  (tofu-ref-path (tf (toset (untf (vector 1 2))))))
 
-(test-equal "tf-string builds templates from fragments"
-  "base64encode(\"${path.root}/x\\n\")"
-  (tofu-ref-path (tf (base64encode (tf-string path.root "/x" "\n")))))
+(test-equal "tf array elements may be references"
+  "toset([ test_thing.example.id ])"
+  (tofu-ref-path (tf (toset (untf (vector test-ref))))))
 
-(test-equal "tf-string interpolates references"
-  "f(\"${test_thing.example.id}\")"
-  (tofu-ref-path (tf (f (tf-string (untf test-ref))))))
+(test-equal "tf array elements may be nested expressions"
+  "toset([ merge({ \"a\" = \"b\" }) ])"
+  (tofu-ref-path (tf (toset (untf (vector (tf (merge (untf '((a . "b")))))))))))
+
+(test-equal "tf array elements may be template strings"
+  "toset([ \"a${b}c\" ])"
+  (tofu-ref-path (tf (toset (untf (vector (tf "a${b}c")))))))
+
+(test-equal "tf mixes literal text and values with HCL format"
+  "base64encode(format(\"%s\\n\", test_thing.example.id))"
+  (tofu-ref-path (tf (base64encode (format "%s\n" (untf test-ref))))))
 
 (test-equal "tf lowers empty lists to objects and empty vectors to arrays"
   "f({}, [])"

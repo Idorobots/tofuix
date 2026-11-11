@@ -67,7 +67,7 @@
                tofu-ref-path
                tofu-ref->string
                attribute ref guile
-               tf untf untf-splicing tf-quote tf-string
+               tf untf untf-splicing
 
                tofu-configuration->scm
                tofu-configuration->json))

@@ -21,9 +21,7 @@
             guile
             tf
             untf
-            untf-splicing
-            tf-quote
-            tf-string))
+            untf-splicing))
 
 ;;;
 ;;; Values that must remain unevaluated in Scheme and are evaluated by
@@ -119,9 +117,8 @@ Guix value that a provider may evaluate in its own environment."
 ;;;
 ;;; (tf ...) compiles tofu-side code into an HCL expression; (untf value)
 ;;; splices a Scheme value, lowered to HCL; (untf-splicing values) splices
-;;; a Scheme list into an argument list.  Lists are applications, except
-;;; under (tf-quote ...), which builds an array literal; (tf-string ...)
-;;; builds a template string from literal and spliced fragments.
+;;; a Scheme list into an argument list.  Lists are applications; string
+;;; atoms are HCL templates; arrays are Scheme vectors inside untf.
 ;;;
 ;;; Reader shortcuts: #%(...) for tf, #^x for untf, #^@x for
 ;;; untf-splicing.  Guix gexps own #~/#$/#+ process-wide, so tofuix uses
@@ -137,16 +134,6 @@ Guix value that a provider may evaluate in its own environment."
   (make-tf-untf-splicing value)
   tf-untf-splicing?
   (value tf-untf-splicing-value))
-
-(define-record-type <tf-quote-form>
-  (make-tf-quote-form values)
-  tf-quote-form?
-  (values tf-quote-form-values))
-
-(define-record-type <tf-string-form>
-  (make-tf-string-form fragments)
-  tf-string-form?
-  (fragments tf-string-form-fragments))
 
 (define* (escape-template-text string #:key (escape-dollar? #f))
   "Escape STRING for a quoted HCL template: backslash, double quote,
@@ -245,15 +232,6 @@ openers (${ and $${) so the text stays literal."
         (map host->hcl values))
       (list (tf-hcl node))))
 
-(define (tf-quote-parts node)
-  (if (tf-untf-splicing? node)
-      (let ((values (tf-untf-splicing-value node)))
-        (unless (list? values)
-          (error (format #f "tofuix: tf: untf-splicing expects a list: ~s"
-                         values)))
-        (map host->hcl values))
-      (list (tf-hcl node))))
-
 (define (tf-application node)
   (unless (and (pair? node) (symbol? (car node)))
     (error (format #f
@@ -263,45 +241,12 @@ openers (${ and $${) so the text stays literal."
           (symbol->string (car node))
           (string-join (append-map tf-argument-parts (cdr node)) ", ")))
 
-(define (tf-template-fragment node)
-  (cond
-   ((tf-untf? node)
-    (let ((value (tf-untf-value node)))
-      (cond
-       ((or (tofu-ref? value) (tofu-resource? value) (tofu-data? value)
-            (tofu-variable? value) (tofu-local? value))
-        (string-append "${" (host->hcl value) "}"))
-       ((string? value) (hcl-literal-text value))
-       ((symbol? value) (symbol->string value))
-       ((boolean? value) (if value "true" "false"))
-       ((number? value) (number->string value))
-       (else
-        (error (format #f "tofuix: tf: cannot use value in a template: ~s"
-                       value))))))
-   ((tf-untf-splicing? node)
-    (error "tofuix: tf: untf-splicing is not valid in tf-string"))
-   ((symbol? node) (string-append "${" (symbol->string node) "}"))
-   ((string? node) (hcl-literal-text node))
-   ((boolean? node) (if node "true" "false"))
-   ((number? node) (number->string node))
-   (else (string-append "${" (tf-hcl node) "}"))))
-
 (define (tf-hcl node)
   "Compile a tf tree NODE to HCL expression text."
   (cond
    ((tf-untf? node) (host->hcl (tf-untf-value node)))
    ((tf-untf-splicing? node)
     (error "tofuix: tf: untf-splicing is only valid in an argument list"))
-   ((tf-quote-form? node)
-    (hcl-array (append-map tf-quote-parts (tf-quote-form-values node))))
-   ((tf-string-form? node)
-    (string-append "\""
-                   (with-output-to-string
-                     (lambda ()
-                       (for-each (lambda (fragment)
-                                   (display (tf-template-fragment fragment)))
-                                 (tf-string-form-fragments node))))
-                   "\""))
    ((symbol? node) (symbol->string node))
    ((string? node) (hcl-string node))
    ((boolean? node) (if node "true" "false"))
@@ -324,25 +269,11 @@ openers (${ and $${) so the text stays literal."
   (syntax-rules ()
     ((_ value) (error "tofuix: untf-splicing is only valid inside tf"))))
 
-(define-syntax tf-quote
-  (syntax-rules ()
-    ((_ item ...) (error "tofuix: tf-quote is only valid inside tf"))))
-
-(define-syntax tf-string
-  (syntax-rules ()
-    ((_ fragment ...) (error "tofuix: tf-string is only valid inside tf"))))
-
 (define (tf-rewrite expression)
   "Rewrite a tf body into a runtime expression building the tf tree."
-  (syntax-case expression (untf untf-splicing tf-quote tf-string tf)
+  (syntax-case expression (untf untf-splicing tf)
     ((untf value) #`(make-tf-untf #,#'value))
     ((untf-splicing value) #`(make-tf-untf-splicing #,#'value))
-    ((tf-quote item ...)
-     #`(make-tf-quote-form
-        (list #,@(map tf-rewrite (syntax-list #'(item ...))))))
-    ((tf-string fragment ...)
-     #`(make-tf-string-form
-        (list #,@(map tf-rewrite (syntax-list #'(fragment ...))))))
     ((tf inner) #`(make-tf-untf (tf #,#'inner)))
     ((head argument ...)
      #`(list 'head #,@(map tf-rewrite (syntax-list #'(argument ...)))))
