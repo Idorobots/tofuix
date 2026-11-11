@@ -114,6 +114,24 @@ Builder scripts that use `#$output` belong in modules that do not import
 `(tofuix)`, because the `output` constructor macro shadows the gexp builder
 variable; see `examples/artifact.scm`.
 
+Named Guix records that have no store form — operating systems, images,
+machines, and other exported records — cross the boundary **by name**, so a
+provider can re-evaluate them in its own environment:
+
+```scheme
+(use-modules (tofuix) (hosts rpi3))
+
+(configuration
+  (resource 'guix_blueprint 'pi3
+    (os rpi3-os)))                  ; -> "(@ (hosts rpi3) rpi3-os)"
+```
+
+An imported binding resolves to its canonical module reference; a value
+defined in the infrastructure file itself is rendered from its captured
+source (with a `(use-modules ...)` preamble for the modules it refers to).
+`(guile '(hosts rpi3) 'rpi3-os)` is the explicit form for values that are
+not loaded or not exported.
+
 ## Development
 
 The test suites run under Guix, as in `spartan-guix`:

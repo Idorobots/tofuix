@@ -159,11 +159,12 @@ arguments, and the arguments FORWARDED to the underlying tool."
         (in-vicinity base file))))
 
 (define (load-configuration file chdir load-path)
-  "Evaluate the infrastructure file; return two values: the configuration
-and the project root."
+  "Evaluate the infrastructure file; return three values: the
+configuration, the project root, and the evaluation session."
   (let ((path (resolve-file file chdir)))
-    (values (tofu-evaluate-file path #:load-path load-path)
-            (tofu-project-root path))))
+    (let-values (((configuration session)
+                  (tofu-evaluate-file path #:load-path load-path)))
+      (values configuration (tofu-project-root path) session))))
 
 ;;;
 ;;; Guix integration: store access, lowering, and the packaged tool
@@ -179,10 +180,12 @@ and the project root."
         (set! %store store)
         store)))
 
-(define* (lower-infrastructure configuration #:key (realize? #f))
+(define* (lower-infrastructure configuration session #:key (realize? #f))
   "Lower the Guix values in CONFIGURATION, realizing artifacts when
-REALIZE? is true."
-  (lower-configuration configuration (guix-store) #:realize? realize?))
+REALIZE? is true.  SESSION is the evaluation session of the infrastructure
+file; it enables named-value resolution."
+  (lower-configuration configuration (guix-store)
+                        #:realize? realize? #:session session))
 
 (define (opentofu-from-store)
   "Return the tofu executable provided by the channel's opentofu package,
@@ -225,8 +228,10 @@ building the package when needed."
   (unless (null? forwarded)
     (throw 'tofuix-error
            (format #f "generate does not run a tool; unexpected arguments: ~s" forwarded)))
-  (let-values (((configuration root) (load-configuration file chdir load-path)))
-    (display (tofu-configuration->json (lower-infrastructure configuration)))
+  (let-values (((configuration root session)
+                (load-configuration file chdir load-path)))
+    (display (tofu-configuration->json
+              (lower-infrastructure configuration session)))
     (newline)
     0))
 
@@ -235,8 +240,10 @@ building the package when needed."
   (unless (null? forwarded)
     (throw 'tofuix-error
            (format #f "build does not run a tool; unexpected arguments: ~s" forwarded)))
-  (let-values (((configuration root) (load-configuration file chdir load-path)))
-    (let* ((lowered (lower-infrastructure configuration #:realize? #t))
+  (let-values (((configuration root session)
+                (load-configuration file chdir load-path)))
+    (let* ((lowered (lower-infrastructure configuration session
+                                           #:realize? #t))
            (workdir (tofu-workdir root)))
       (tofu-write-configuration lowered workdir)
       (display (tofu-configuration->json lowered))
@@ -249,8 +256,9 @@ building the package when needed."
 
 (define (command-validate file chdir load-path positionals forwarded tool)
   (no-positionals "validate" positionals)
-  (let-values (((configuration root) (load-configuration file chdir load-path)))
-    (let* ((lowered (lower-infrastructure configuration))
+  (let-values (((configuration root session)
+                (load-configuration file chdir load-path)))
+    (let* ((lowered (lower-infrastructure configuration session))
            (workdir (tofu-workdir root))
            (program (resolve-tool tool)))
       (tofu-write-configuration lowered workdir)
@@ -261,8 +269,9 @@ building the package when needed."
 
 (define (command-plan file chdir load-path positionals forwarded tool)
   (no-positionals "plan" positionals)
-  (let-values (((configuration root) (load-configuration file chdir load-path)))
-    (let* ((lowered (lower-infrastructure configuration))
+  (let-values (((configuration root session)
+                (load-configuration file chdir load-path)))
+    (let* ((lowered (lower-infrastructure configuration session))
            (workdir (tofu-workdir root))
            (program (resolve-tool tool)))
       (tofu-write-configuration lowered workdir)
@@ -273,8 +282,10 @@ building the package when needed."
 
 (define (command-apply file chdir load-path positionals forwarded tool)
   (no-positionals "apply" positionals)
-  (let-values (((configuration root) (load-configuration file chdir load-path)))
-    (let* ((lowered (lower-infrastructure configuration #:realize? #t))
+  (let-values (((configuration root session)
+                (load-configuration file chdir load-path)))
+    (let* ((lowered (lower-infrastructure configuration session
+                                           #:realize? #t))
            (workdir (tofu-workdir root))
            (program (resolve-tool tool)))
       (tofu-write-configuration lowered workdir)
@@ -289,9 +300,9 @@ building the package when needed."
   (let* ((program (resolve-tool tool))
          (root (cond
                 (file
-                 (let-values (((configuration root)
-                               (load-configuration file chdir load-path)))
-                   root))
+                 (let-values (((configuration root session)
+                              (load-configuration file chdir load-path)))
+                  root))
                 (chdir (canonicalize-path chdir))
                 (else (getcwd))))
          (workdir (tofu-workdir root))

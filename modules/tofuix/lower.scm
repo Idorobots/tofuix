@@ -14,13 +14,44 @@
   #:use-module (guix gexp)
   #:use-module (guix packages)
   #:use-module (guix derivations)
+  #:autoload (gnu system) (operating-system?)
+  #:autoload (gnu image) (image?)
+  #:autoload (gnu machine) (machine?)
   #:use-module (tofuix expressions)
+  #:use-module (tofuix provenance)
   #:use-module (tofuix records)
   #:export (lower-value
             lower-configuration))
 
 (define (tofu-error format-string . arguments)
   (throw 'tofuix-error (apply format #f format-string arguments)))
+
+(define %named-record-type-names
+  ;; Guix records that cross the tofuix boundary by name instead of a
+  ;; store path.  The vtable-name check is a cheap gate; the real
+  ;; predicates are autoloaded because (gnu system) and friends are heavy
+  ;; and must not load for every file-like value.
+  '(<operating-system> <image> <machine>))
+
+(define (record-type-name* value)
+  "Return the record type name of the struct VALUE, or #f."
+  (and (struct? value)
+       (or (false-if-exception (record-type-name (struct-vtable value)))
+           #f)))
+
+(define (named-record? value)
+  "Return true when VALUE is one of the Guix records that providers
+re-evaluate by name (operating systems, images, machines)."
+  (and (struct? value)
+       (member (record-type-name* value) %named-record-type-names)
+       (or (operating-system? value)
+           (image? value)
+           (machine? value))))
+
+(define (lower-named-value value session)
+  (or (resolve-named-value value session)
+      (tofu-error "cannot lower value: ~s; this Guix record has no store form, so it crosses the tofuix boundary by name: export it from (or define it in) a module the provider can load, or reference it explicitly with (guile MODULE BINDING)"
+                  value)))
 
 (define (lower-file-like object store remember)
   "Return the store path for the file-like OBJECT, remembering its
@@ -37,58 +68,76 @@ for realization."
     (remember derivation)
     (derivation->output-path derivation output)))
 
-(define (lower-value-with value store remember)
+(define (lower-value-with value store remember session)
   "Lower VALUE against STORE, calling REMEMBER on every derivation that
-would have to be built for the value to be real."
+would have to be built for the value to be real.  SESSION is the
+evaluation session used to resolve named Guix values, or #f."
   (cond
    ;; Reference expressions and records are values, not containers: a
    ;; resource used as an argument is a whole-object reference.
    ((tofu-ref? value) value)
    ((or (tofu-resource? value) (tofu-data? value)
-        (tofu-variable? value) (tofu-local? value))
+         (tofu-variable? value) (tofu-local? value))
     value)
    ((or (string? value) (symbol? value) (boolean? value) (number? value))
     value)
-   ;; (package . \"output\") selects a non-default output.
+   ;; (package . "output") selects a non-default output.
    ((and (pair? value) (package? (car value)) (string? (cdr value)))
     (lower-package (car value) (cdr value) store remember))
    ((vector? value)
     (list->vector (map (lambda (element)
-                         (lower-value-with element store remember))
-                       (vector->list value))))
+                          (lower-value-with element store remember session))
+                        (vector->list value))))
    ((list? value)
     ;; Lists are objects; vectors are arrays.  An empty list is the empty
     ;; object.
     (map (lambda (entry)
-           (unless (and (pair? entry)
-                        (or (symbol? (car entry)) (string? (car entry))))
-             (tofu-error "lists are objects: expected (key . value) entries in ~s; use vectors for arrays"
-                         value))
-           (cons (car entry) (lower-value-with (cdr entry) store remember)))
-         value))
+            (unless (and (pair? entry)
+                         (or (symbol? (car entry)) (string? (car entry))))
+              (tofu-error "lists are objects: expected (key . value) entries in ~s; use vectors for arrays"
+                          value))
+            (cons (car entry)
+                  (lower-value-with (cdr entry) store remember session)))
+          value))
+   ;; Named Guix records cross the boundary by name (plan 7.1): they have
+   ;; no store form, and some (operating systems, images) are file-like?,
+   ;; so they must not reach the store branches below.
+   ((and session (named-record? value))
+    (lower-named-value value session))
    ((file-like? value) (lower-file-like value store remember))
    ((package? value) (lower-package value "out" store remember))
+   ;; Any other struct: anonymous unless provenance names it.
+   ((and session (struct? value))
+    (or (resolve-named-value value session)
+        (tofu-error "cannot lower value: ~s; expected a string, number, boolean, symbol, association list (object) or vector (array), an OpenTofu expression, a file-like object, a package, or a named Guix value exported from a module the provider can load"
+                    value)))
    (else
     (tofu-error "cannot lower value: ~s; expected a string, number, boolean, symbol, association list (object) or vector (array), an OpenTofu expression, a file-like object, or a package"
                 value))))
 
-(define (lower-value value store)
+(define* (lower-value value store #:key (session #f))
   "Return VALUE with Guix objects replaced by their store paths.
 
 Derivations are computed but not built; use `lower-configuration' with
-`#:realize? #t' to build the artifacts a configuration needs."
-  (lower-value-with value store (lambda (derivation) #f)))
+`#:realize? #t' to build the artifacts a configuration needs.  SESSION,
+the evaluation session of the configuration's file, enables named-value
+resolution for Guix records."
+  (lower-value-with value store (lambda (derivation) #f) session))
 
-(define* (lower-configuration configuration store #:key (realize? #f))
+(define* (lower-configuration configuration store
+                                #:key (realize? #f) (session #f))
   "Return CONFIGURATION with every argument value lowered against STORE.
 
 The configuration's records are rebuilt, so the result serializes exactly
 as the original with the lowered values in place.  When REALIZE? is true,
-the derivations the lowering computed are built before returning."
+the derivations the lowering computed are built before returning.  SESSION
+is the evaluation session of the configuration's file; it enables
+named-value resolution for Guix records."
   (let ((pending '()))
     (define (remember derivation)
       (set! pending (cons derivation pending)))
-    (define (lower value) (lower-value-with value store remember))
+    (define (lower value)
+      (lower-value-with value store remember session))
     (define (lower-fields fields)
       (map (lambda (entry) (cons (car entry) (lower (cdr entry)))) fields))
     (let ((lowered

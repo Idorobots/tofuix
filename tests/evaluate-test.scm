@@ -7,6 +7,7 @@
 (define-module (tests evaluate-test)
   #:use-module (ice-9 textual-ports)
   #:use-module (srfi srfi-13)
+  #:use-module (srfi srfi-11)
   #:use-module (srfi srfi-64)
   #:use-module (tofuix evaluate)
   #:use-module (tofuix records)
@@ -33,9 +34,11 @@
 
 (test-begin "evaluate")
 
-(test-equal "the tls example serializes byte-exactly to the golden JSON"
-  golden
-  (tofu-configuration->json (tofu-evaluate-file "examples/tls.scm")))
+(let-values (((configuration session)
+              (tofu-evaluate-file "examples/tls.scm")))
+  (test-equal "the tls example serializes byte-exactly to the golden JSON"
+    golden
+    (tofu-configuration->json configuration)))
 
 (let* ((directory (make-temp-directory))
        (file (in-vicinity directory "infrastructure.scm")))
@@ -45,7 +48,7 @@
 (define infrastructure
   (configuration (resource 'terraform_data 'example (input \"hello\"))))
 ")
-  (let ((configuration (tofu-evaluate-file file)))
+  (let-values (((configuration session) (tofu-evaluate-file file)))
     (test-assert "a file defining infrastructure yields it"
       (tofu-configuration? configuration))
     (test-equal "the defined configuration carries its resources"
@@ -64,9 +67,9 @@
 ")
   (test-equal "the value of the last expression is used"
     "expression"
-    (let* ((configuration (tofu-evaluate-file file))
-           (resource (car (tofu-configuration-resources configuration))))
-      (cdr (assoc "input" (tofu-resource-arguments resource)))))
+    (let-values (((configuration session) (tofu-evaluate-file file)))
+      (let ((resource (car (tofu-configuration-resources configuration))))
+        (cdr (assoc "input" (tofu-resource-arguments resource))))))
   (delete-directory directory))
 
 (let* ((directory (make-temp-directory))
@@ -80,9 +83,9 @@
 ")
   (test-equal "relative file references resolve against the project root"
     "relative contents"
-    (let* ((configuration (tofu-evaluate-file file))
-           (local (car (tofu-configuration-locals configuration))))
-      (tofu-local-value local)))
+    (let-values (((configuration session) (tofu-evaluate-file file)))
+      (let ((local (car (tofu-configuration-locals configuration))))
+        (tofu-local-value local))))
   (test-equal "the current directory is restored after evaluation"
     (getcwd)
     (begin (tofu-evaluate-file file) (getcwd)))
@@ -105,9 +108,10 @@
 ")
   (test-equal "load paths make project modules loadable"
     "blueprint-reference"
-    (let* ((configuration (tofu-evaluate-file file #:load-path (list directory)))
-           (local (car (tofu-configuration-locals configuration))))
-      (tofu-local-value local)))
+    (let-values (((configuration session)
+                  (tofu-evaluate-file file #:load-path (list directory))))
+      (let ((local (car (tofu-configuration-locals configuration))))
+        (tofu-local-value local))))
   (delete-directory directory))
 
 (let* ((directory (make-temp-directory))
@@ -122,9 +126,9 @@
 ")
   (test-equal "a define-module file is found through its binding"
     "defined"
-    (let* ((configuration (tofu-evaluate-file file))
-           (resource (car (tofu-configuration-resources configuration))))
-      (cdr (assoc "input" (tofu-resource-arguments resource)))))
+    (let-values (((configuration session) (tofu-evaluate-file file)))
+      (let ((resource (car (tofu-configuration-resources configuration))))
+        (cdr (assoc "input" (tofu-resource-arguments resource))))))
   (delete-directory directory))
 
 (test-error "a missing infrastructure file is an error"
@@ -137,6 +141,28 @@
   (test-error "a file without a configuration is an error"
     'tofuix-error
     (tofu-evaluate-file file))
+  (delete-directory directory))
+
+(let* ((directory (make-temp-directory))
+       (file (in-vicinity directory "infrastructure.scm")))
+  (write-file file "\
+(use-modules (tofuix))
+
+(define a-value (list 'captured))
+(define (a-function x) x)
+
+(configuration (resource 'terraform_data 'session (input \"x\")))
+")
+  (let-values (((configuration session) (tofu-evaluate-file file)))
+    (test-equal "the session captures the source of plain defines"
+      '(list 'captured)
+      (assq-ref (evaluation-session-local-forms session) 'a-value))
+    (test-equal "function defines are captured as lambdas"
+      '(lambda (x) x)
+      (assq-ref (evaluation-session-local-forms session) 'a-function))
+    (test-assert "the session keeps the evaluation module"
+      (equal? (module-ref (evaluation-session-module session) 'a-value)
+              (list 'captured))))
   (delete-directory directory))
 
 (test-error "a missing load path entry is an error"

@@ -10,16 +10,20 @@
 
 (use-modules (ice-9 textual-ports)
              (srfi srfi-9)
+             (srfi srfi-11)
              (srfi srfi-13)
              (guix store)
              (guix gexp)
              (guix packages)
              (guix derivations)
              (gnu packages base)
+             (gnu system)
              (tofuix)
+             (tofuix evaluate)
              (tofuix lower)
              (tofuix serializer)
-             (tests runtime lib artifacts))
+             (tests runtime lib artifacts)
+             (tests runtime lib os-fixture))
 
 (define store (open-connection))
 
@@ -28,10 +32,13 @@
     (error "lowering check failed" what))
   (format #t "PASS ~a~%" what))
 
-(define (resource-input lowered)
-  (cdr (assoc "input"
+(define (resource-argument name lowered)
+  (cdr (assoc name
               (tofu-resource-arguments
                (car (tofu-configuration-resources lowered))))))
+
+(define (resource-input lowered)
+  (resource-argument "input" lowered))
 
 ;;; File-like objects: plain-file is imported immediately.
 (let ((path (lower-value greeting store)))
@@ -97,6 +104,53 @@
          (string-contains json "\"${terraform_data.example}\""))
   (check "lowering keeps attribute references intact"
          (string-contains json "\"${terraform_data.example.id}\"")))
+
+;;; Named Guix records: operating systems cross the boundary by name
+;;; instead of a store path.
+(define os-session
+  (make-evaluation-session (current-module) '()))
+
+(let ((lowered
+       (lower-configuration
+        (configuration
+          (resource 'guix_blueprint 'demo (os demo-os)))
+        store #:session os-session)))
+  (check "imported operating systems lower to their module reference"
+         (string=? (resource-argument "os" lowered)
+                   "(@ (tests runtime lib os-fixture) demo-os)")))
+
+;;; Locally defined operating systems render the source captured at
+;;; evaluation time.
+(let* ((directory (mkdtemp "/tmp/tofuix-runtime-XXXXXX"))
+       (file (in-vicinity directory "infrastructure.scm")))
+  (call-with-output-file file
+    (lambda (port)
+      (display "\
+(use-modules (gnu system) (tofuix))
+
+(define my-os
+  (operating-system
+    (host-name \"runtime-local\")
+    (bootloader #f)
+    (file-systems '())))
+
+(define infrastructure
+  (configuration
+    (resource 'guix_blueprint 'local (os my-os))))
+" port)))
+  (let-values (((configuration session) (tofu-evaluate-file file)))
+    (let ((lowered (lower-configuration configuration store
+                                        #:session session)))
+      (check "local operating systems render their captured source"
+             (equal? (read (open-input-string
+                            (resource-argument "os" lowered)))
+                     '(begin
+                        (use-modules (gnu system))
+                        (operating-system
+                          (host-name "runtime-local")
+                          (bootloader #f)
+                          (file-systems '())))))))
+  (system* "rm" "-rf" directory))
 
 ;;; Anything else is an explicit error.
 (define-record-type <opaque>

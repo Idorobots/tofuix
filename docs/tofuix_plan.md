@@ -3,13 +3,15 @@
 **Project:** `tofuix`, developed in the `./tofuix` git module
 (<https://github.com/Idorobots/tofuix>, already registered as a submodule).
 **Command:** `guix tofu`, delivered as a Guix channel extension.
-**Status:** M1–M3 implemented — Scheme DSL, JSON serializer, 169 SRFI-64
+**Status:** M1–M3 implemented — Scheme DSL, JSON serializer, 184 SRFI-64
 unit tests plus store-dependent runtime checks, the `examples/tls.scm` golden
 example, the `guix tofu` extension (`generate`/`build`/`validate`/`plan`/
 `apply`/`output`, working-directory and lock management, `--tool` selection),
-Guix-value lowering (file-like objects and packages to store paths), the
-channel's pinned `opentofu` package with PATH → store tool fallback, and the
-gexp-like `tf`/`untf`/`untf-splicing` expression layer. Tests run under Guix,
+Guix-value lowering (file-like objects and packages to store paths; named
+Guix records such as operating systems and images to module references), the
+channel's pinned `opentofu` package with PATH → store tool fallback, the
+gexp-like `tf`/`untf`/`untf-splicing` expression layer, and the Scheme-source
+template helper. Tests run under Guix,
 and CI pins channels like `spartan-guix` does. M4 (staged orchestration) is
 next.
 
@@ -127,7 +129,8 @@ tofuix/
 │       ├── expressions.scm  # expression AST (ref, attribute, tf, ...)
 │       ├── template.scm     # Scheme-source templates ({{name}} placeholders)
 │       ├── serializer.scm   # tree -> .tf.json (guile-json)
-│       ├── evaluate.scm     # load/evaluate infrastructure files
+│       ├── evaluate.scm     # load/evaluate infrastructure files; sessions
+│       ├── provenance.scm   # named Guix values -> module references
 │       ├── workdir.scm      # working directory and tofu invocation
 │       ├── lower.scm        # Guix-value lowering
 │       └── packages.scm     # pinned opentofu package
@@ -455,8 +458,7 @@ always available.
 | Expression AST (`ref`, `attribute` results, ...) | Serialize as OpenTofu expression |
 | File-like object (plain-file, computed-file, ...) | Lower to store path string |
 | Package | Resolve selected output's store path |
-| `<image>` / operating-system-based artifacts (v1.1) | Derive image; use its derivation output path |
-| Other named Guix records (`<operating-system>`, service configs, ...) (v1.1) | Resolve the binding's module provenance → canonical module-reference string (section 7.1) |
+| Named Guix record (`<operating-system>`, `<image>`, `<machine>`, other exported records) | Resolve the binding's module provenance → canonical module-reference string (section 7.1) |
 | Anything else with no store form and no discoverable binding | Error listing the explicit remedies |
 
 For `plan`, derivations are constructed but **not realized**; the prospective
@@ -468,9 +470,12 @@ knowing anything about the provider consuming the path.
 
 Implementation: `(tofuix lower)` imports `(guix store)`, `(guix gexp)`,
 `(guix packages)`, and `(guix derivations)` directly and works on a real
-store. `lower-value` computes file-like objects with `lower-object` and
-packages with `package-derivation`; `lower-configuration` collects the
-derivations involved and, with `#:realize? #t`, builds them before returning
+store; `(tofuix provenance)` resolves named values against the evaluation
+session (section 7.1), and the `(gnu system)`/`(gnu image)`/`(gnu machine)`
+predicates are autoloaded. `lower-value` computes file-like objects with
+`lower-object` and packages with `package-derivation`; `lower-configuration`
+collects the derivations involved and, with `#:realize? #t`, builds them
+before returning
 — so `generate`/`validate`/`plan` leave artifacts prospective while
 `build`/`apply` realize them. The store connection is opened on first use.
 
@@ -493,28 +498,65 @@ evaluate their own Scheme expressions in a pinned-channel, source-bundle
 environment rather than accepting objects. Such values cross the tofuix
 boundary **by name**, as canonical Guile module references:
 
-- `(os rpi3-os)` — with `(hosts rpi3)` loaded in the tofuix evaluation
-  session — works as plain Scheme evaluation followed by provenance
-  resolution: tuple values are evaluated normally, so tofuix holds the
-  actual `<operating-system>` value; lowering then scans loaded module
-  interfaces for a public binding holding the same object (`eq?`) and
-  serializes the argument as `"(@ (hosts rpi3) rpi3-os)"`.
-- Zero matches → error suggesting the explicit form; multiple matches →
-  error listing the candidate modules.
-- `(guile '(hosts rpi3) 'rpi3-os)` is the explicit expression for values
-  that are not loaded, not exported, or anonymous; the sugar form in the
-  section 5.2 example is exactly equivalent to it.
-- tofuix transfers the *identity* of the configuration, never the object:
-  the provider keeps evaluating the expression in its own environment. The
-  rule remains provider-agnostic — tofuix merely produces a canonical name
-  for a named Guix value, exactly as it produces a store path for a
-  file-like object, without knowing what any provider does with it.
-- This requires the defining modules to be loadable in the tofuix session;
-  `guix tofu -L/--load-path` (section 8) prepends directories to the load
-  path when evaluating the infrastructure file. The extension does **not**
-  wrap evaluation in `guix time-machine` itself: users run
-  `guix time-machine -C channels-lock.scm -- guix tofu -L ...` when they
-  need evaluation at pinned channel revisions.
+```scheme
+(os rpi3-os)             ; -> "(@ (hosts rpi3) rpi3-os)"
+```
+
+Evaluation returns a *session* alongside the configuration: the module the
+infrastructure file ran in, plus the source of its top-level `define`s.
+`lower-configuration`/`lower-value` take it as `#:session`; lowering resolves
+each named value's provenance against it:
+
+- **Imported bindings.** tofuix scans the public interfaces of the modules
+  the infrastructure file used for a binding holding the same object
+  (`eq?`) and serializes the argument as its canonical reference
+  `"(@ (hosts rpi3) rpi3-os)"`. Exactly one match is required; several are
+  an error listing the candidate modules.
+- **Local bindings.** A value defined in the infrastructure file itself
+  (including an alias of an imported value that matches no export) is
+  rendered from the source captured at evaluation time: local references
+  are substituted recursively, imported references stay as bare symbols,
+  and a `(use-modules ...)` preamble is emitted for the modules those
+  symbols come from. The provider re-evaluates that source in its own
+  environment, so a local definition must be deterministic and must not
+  close over runtime state; definitions the capture cannot see
+  (macro-produced definitions, `define-values`, `begin`-wrapped defines)
+  are an error with guidance to move the value into a module or use
+  `(guile ...)`.
+- Circular local references are an error.
+- `(guile '(hosts rpi3) 'rpi3-os)` remains the explicit expression for
+  values that are not loaded, not exported, or anonymous; the sugar form in
+  the section 5.2 example is exactly equivalent to it.
+
+Precedence: an imported binding wins over a local one, because the provider
+can load the module directly and the reference is stable.
+
+Lowering dispatch: `<operating-system>`, `<image>` and `<machine>` records
+are recognized by their record type name (a cheap gate) and confirmed with
+the real predicates, then resolved by name. This runs *before* the
+file-like branch, because `<operating-system>` and `<image>` are
+`file-like?` and would otherwise be mis-lowered to a root filesystem
+derivation. Other records that are neither file-like nor packages are
+resolved by name too, and error with the explicit remedies when anonymous.
+Named records are therefore always lowered by name — wrap the artifact in a
+file-like (for example a `computed-file`) when a store path is wanted
+instead. The Guix predicate modules are autoloaded and consulted only for
+values whose record type name matches, so ordinary configurations never pay
+for loading `(gnu system)`.
+
+tofuix transfers the *identity* of the configuration, never the object: the
+provider keeps evaluating the expression in its own environment. The rule
+remains provider-agnostic — tofuix merely produces a canonical name for a
+named Guix value, exactly as it produces a store path for a file-like
+object, without knowing what any provider does with it.
+
+This requires the defining modules to be loadable in the tofuix session;
+`guix tofu -L/--load-path` (section 8) prepends directories to the load
+path when evaluating the infrastructure file. The extension does **not**
+wrap evaluation in `guix time-machine` itself: users run
+`guix time-machine -C channels-lock.scm -- guix tofu -L ...` when they
+need evaluation at pinned channel revisions. The modules the provider must
+load are shipped through the blueprint's `source_files`.
 
 ## 8. Command set
 
@@ -606,11 +648,14 @@ Execution model:
   available and no separate test environment is needed.
 - Unit tests (SRFI-64, `tests/`): records construction and merge rules;
   expression serialization; serializer output fixtures (golden JSON);
-  evaluation, working-directory, CLI, and lowering-free cases.
+  evaluation and session capture, provenance resolution (imported and local
+  bindings, aliases, circular and uncaptured errors), Scheme-source
+  templates, working-directory, CLI, and lowering-free cases.
 - Store-dependent checks (`tests/runtime/`): lowering against the real store
   — `plain-file` import, prospective `computed-file` paths, realization,
-  package paths, and reference preservation. Run with `make check-runtime`
-  (needs a daemon).
+  package paths, reference preservation, and named operating systems
+  (imported and locally defined). Run with `make check-runtime` (needs a
+  daemon).
 - `guix test` is not used.
 - CI follows `spartan-guix`: install Guix, emit an exact-commit channel list
   from `ci/channels.scm`, bootstrap it with `guix time-machine`, then run
