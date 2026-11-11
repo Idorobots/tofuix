@@ -24,9 +24,21 @@
 ;;; Finding bindings by value.
 ;;;
 
+(define (binding-value variable)
+  "Return the value of VARIABLE, or #f when it cannot be read.  Reading a
+binding may trigger an autoload; that is acceptable, because the module is
+part of the pinned channels the evaluation runs against."
+  (and (variable-bound? variable)
+       (false-if-exception (variable-ref variable))))
+
 (define (interface-matches session value)
   "Return ((MODULE-NAME . BINDING) ...) for every public binding among the
-modules the evaluation session used that holds the object VALUE."
+modules the evaluation session imported directly that holds the object
+VALUE.
+
+Only direct imports are searched: a Guix value used in a tofuix
+configuration must be imported into its scope, or be re-exported by a
+direct import.  Indirect imports are not followed."
   (delete-duplicates
    (append-map
     (lambda (interface)
@@ -34,8 +46,7 @@ modules the evaluation session used that holds the object VALUE."
             (matches '()))
         (module-for-each
          (lambda (binding variable)
-           (when (and (variable-bound? variable)
-                      (eq? (variable-ref variable) value))
+           (when (eq? (binding-value variable) value)
              (set! matches (cons (cons name binding) matches))))
          interface)
         matches))
@@ -46,16 +57,31 @@ modules the evaluation session used that holds the object VALUE."
   (let ((matches '()))
     (module-for-each
      (lambda (binding variable)
-       (when (and (variable-bound? variable)
-                  (eq? (variable-ref variable) value))
+       (when (eq? (binding-value variable) value)
          (set! matches (cons binding matches))))
      (evaluation-session-module session))
     matches))
 
 ;;;
-;;; Rendering local bindings: their captured source, with local references
-;;; substituted and the modules of imported references made loadable.
+;;; Rendering local bindings: the captured source, with local references
+;;; substituted, prefixed by every module the infrastructure file imported.
 ;;;
+
+(define %ignored-imports
+  ;; Core is always available, and tofuix's own modules are never Guix
+  ;; value providers; making the provider load them would be surprising.
+  '(guile tofuix))
+
+(define (imported-modules session)
+  "Return the module names the infrastructure file imported directly,
+excluding core and tofuix's own modules."
+  (delete-duplicates
+   (filter (lambda (name)
+             (and (pair? name)
+                  (not (memq (car name) %ignored-imports))))
+           (map module-name
+                (module-uses (evaluation-session-module session))))
+   equal?))
 
 (define (captured-form name session)
   (or (assq-ref (evaluation-session-local-forms session) name)
@@ -67,12 +93,10 @@ modules the evaluation session used that holds the object VALUE."
 
 (define (render-local-form name session)
   "Return source text that re-evaluates the local binding NAME in the
-provider's environment."
-  (let* ((eval-module (evaluation-session-module session))
-         (modules '()))
-    (define (add-module! name*)
-      (unless (or (member name* modules) (equal? name* '(guile)))
-        (set! modules (cons name* modules))))
+provider's environment: its captured source, with local references
+substituted, prefixed by every module the infrastructure file imported
+(just in case the source needs them)."
+  (let ((eval-module (evaluation-session-module session)))
     (define (walk form in-progress)
       (cond
        ((symbol? form)
@@ -81,16 +105,12 @@ provider's environment."
           (tofu-error "circular reference between local bindings: ~a"
                       form))
          ;; A local binding: substitute its captured source.
-         ((module-local-variable eval-module form)
+         ((module-locally-bound? eval-module form)
           (walk (captured-form form session) (cons form in-progress)))
-         ;; A binding from a used module: the provider must load that
-         ;; module; core (guile) bindings are always available.
-         (else
-          (for-each (lambda (interface)
-                      (when (module-local-variable interface form)
-                        (add-module! (module-name interface))))
-                    (module-uses eval-module))
-          form)))
+         ;; Anything else stays as written: imported bindings resolve
+         ;; through the preamble, record field names and other syntax are
+         ;; left alone.
+         (else form)))
        ;; Quoted data is data, not code.
        ((and (pair? form) (eq? (car form) 'quote))
         form)
@@ -100,11 +120,12 @@ provider's environment."
             (cons (walk (car form) in-progress)
                   (walk (cdr form) in-progress))))
        (else form)))
-    (let* ((form    (captured-form name session))
-           (walked  (walk form (list name)))
-           (preamble (and (pair? modules)
+    (let* ((form     (captured-form name session))
+           (walked   (walk form (list name)))
+           (imports  (imported-modules session))
+           (preamble (and (pair? imports)
                           `(use-modules
-                            ,@(sort modules
+                            ,@(sort imports
                                     (lambda (a b)
                                       (string<? (module-name->string a)
                                                 (module-name->string b)))))))
@@ -123,7 +144,11 @@ provider's environment."
 Imported bindings resolve to their canonical module reference
 \"(@ (hosts rpi3) rpi3-os)\"; local bindings render the source captured at
 evaluation time.  Imported bindings win over local ones because the
-provider can load the module directly."
+provider can load the module directly.
+
+Only the infrastructure file's direct imports and its own local bindings
+are considered: a value used in a configuration must be imported into its
+scope, or be re-exported by a direct import."
   (let ((imports (interface-matches session value)))
     (cond
      ((pair? imports)

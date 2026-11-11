@@ -128,9 +128,9 @@ provider can re-evaluate them in its own environment:
 
 An imported binding resolves to its canonical module reference; a value
 defined in the infrastructure file itself is rendered from its captured
-source (with a `(use-modules ...)` preamble for the modules it refers to).
-`(guile '(hosts rpi3) 'rpi3-os)` is the explicit form for values that are
-not loaded or not exported.
+source, prefixed with the modules the file imported. Only the file's direct
+imports and its own bindings are searched; `(guile '(hosts rpi3) 'rpi3-os)`
+is the explicit form for values that are not loaded or not exported.
 
 ## Development
 

@@ -3,7 +3,7 @@
 **Project:** `tofuix`, developed in the `./tofuix` git module
 (<https://github.com/Idorobots/tofuix>, already registered as a submodule).
 **Command:** `guix tofu`, delivered as a Guix channel extension.
-**Status:** M1–M3 implemented — Scheme DSL, JSON serializer, 184 SRFI-64
+**Status:** M1–M3 implemented — Scheme DSL, JSON serializer, 186 SRFI-64
 unit tests plus store-dependent runtime checks, the `examples/tls.scm` golden
 example, the `guix tofu` extension (`generate`/`build`/`validate`/`plan`/
 `apply`/`output`, working-directory and lock management, `--tool` selection),
@@ -508,25 +508,31 @@ infrastructure file ran in, plus the source of its top-level `define`s.
 each named value's provenance against it:
 
 - **Imported bindings.** tofuix scans the public interfaces of the modules
-  the infrastructure file used for a binding holding the same object
-  (`eq?`) and serializes the argument as its canonical reference
+  the infrastructure file imported directly for a binding holding the same
+  object (`eq?`) and serializes the argument as its canonical reference
   `"(@ (hosts rpi3) rpi3-os)"`. Exactly one match is required; several are
   an error listing the candidate modules.
 - **Local bindings.** A value defined in the infrastructure file itself
   (including an alias of an imported value that matches no export) is
   rendered from the source captured at evaluation time: local references
-  are substituted recursively, imported references stay as bare symbols,
-  and a `(use-modules ...)` preamble is emitted for the modules those
-  symbols come from. The provider re-evaluates that source in its own
-  environment, so a local definition must be deterministic and must not
-  close over runtime state; definitions the capture cannot see
-  (macro-produced definitions, `define-values`, `begin`-wrapped defines)
-  are an error with guidance to move the value into a module or use
-  `(guile ...)`.
+  are substituted recursively, and the result is prefixed with a
+  `(use-modules ...)` preamble carrying *every* module the file imported
+  (just in case the source needs them), minus core and tofuix's own
+  modules. The provider re-evaluates that source in its own environment, so
+  a local definition must be deterministic and must not close over runtime
+  state; definitions the capture cannot see (macro-produced definitions,
+  `define-values`, `begin`-wrapped defines) are an error with guidance to
+  move the value into a module or use `(guile ...)`.
 - Circular local references are an error.
 - `(guile '(hosts rpi3) 'rpi3-os)` remains the explicit expression for
   values that are not loaded, not exported, or anonymous; the sugar form in
   the section 5.2 example is exactly equivalent to it.
+
+Scope: only the file's **direct imports** and its **own local bindings** are
+considered. A Guix value used in a configuration must be imported into its
+scope, or be re-exported by a direct import; indirect (transitive) imports
+are not followed, and there is no global search. When provenance cannot be
+computed, lowering is an error.
 
 Precedence: an imported binding wins over a local one, because the provider
 can load the module directly and the reference is stable.

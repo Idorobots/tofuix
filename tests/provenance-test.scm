@@ -95,11 +95,14 @@
 
 (configuration (resource 'terraform_data 'demo (input \"x\")))
 ")))
-  (test-equal "local bindings render their captured source"
-    '(list 'x 1 "two")
-    (read-source
-     (resolve-named-value (session-module-value session 'local-thing)
-                          session))))
+  (let ((rendered
+         (resolve-named-value (session-module-value session 'local-thing)
+                              session)))
+    (test-equal "local bindings render their captured source"
+      '(list 'x 1 "two")
+      (read-source rendered))
+    (test-assert "tofuix's own modules are not part of the preamble"
+      (not (string-contains rendered "use-modules")))))
 
 (let* ((session (evaluate-infrastructure "\
 (use-modules (tofuix))
@@ -124,11 +127,24 @@
   (let ((rendered
          (resolve-named-value (session-module-value session 'wrapper)
                               session)))
-    (test-assert "local forms load the modules of imported references"
+    (test-assert "local forms are prefixed with the file's imports"
       (string-contains rendered "use-modules"))
     (test-equal "local forms keep imported references by name"
       '(list 'wrap shared-object)
       (caddr (read-source rendered)))))
+
+(let* ((session (evaluate-infrastructure "\
+(use-modules (tests fixtures provenance-a) (ice-9 format) (tofuix))
+
+(define unrelated (list 'plain))
+
+(configuration (resource 'terraform_data 'demo (input \"x\")))
+")))
+  (test-equal "the preamble carries every direct import, used or not"
+    '(use-modules (ice-9 format) (tests fixtures provenance-a))
+    (cadr (read-source
+           (resolve-named-value (session-module-value session 'unrelated)
+                                session)))))
 
 (let* ((session (evaluate-infrastructure "\
 (use-modules (tofuix))
