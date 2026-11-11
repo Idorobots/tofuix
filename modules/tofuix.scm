@@ -11,6 +11,7 @@
   #:use-module (tofuix records)
   #:use-module (tofuix expressions)
   #:use-module (tofuix serializer)
+  #:use-module (tofuix template)
   #:re-export (configuration resource data provider variable output local
                obj
 
@@ -68,6 +69,7 @@
                tofu-ref->string
                attribute ref guile
                tf untf untf-splicing
+               render-template template-file
 
                tofu-configuration->scm
                tofu-configuration->json))

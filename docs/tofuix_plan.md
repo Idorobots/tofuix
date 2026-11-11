@@ -3,7 +3,7 @@
 **Project:** `tofuix`, developed in the `./tofuix` git module
 (<https://github.com/Idorobots/tofuix>, already registered as a submodule).
 **Command:** `guix tofu`, delivered as a Guix channel extension.
-**Status:** M1–M3 implemented — Scheme DSL, JSON serializer, 155 SRFI-64
+**Status:** M1–M3 implemented — Scheme DSL, JSON serializer, 169 SRFI-64
 unit tests plus store-dependent runtime checks, the `examples/tls.scm` golden
 example, the `guix tofu` extension (`generate`/`build`/`validate`/`plan`/
 `apply`/`output`, working-directory and lock management, `--tool` selection),
@@ -125,6 +125,7 @@ tofuix/
 │   └── tofuix/
 │       ├── records.scm      # configuration/resource/provider/variable/output
 │       ├── expressions.scm  # expression AST (ref, attribute, tf, ...)
+│       ├── template.scm     # Scheme-source templates ({{name}} placeholders)
 │       ├── serializer.scm   # tree -> .tf.json (guile-json)
 │       ├── evaluate.scm     # load/evaluate infrastructure files
 │       ├── workdir.scm      # working directory and tofu invocation
@@ -379,7 +380,45 @@ that serializes as an interpolation, e.g.
 
 `untf` lowers Scheme *data*, not Guix objects: file-like objects and
 packages stay outside `tf` and are lowered later by the M3 lowering pass.
+For provider-side *Scheme source* (section 5.4), use a template file instead
+of gluing strings.
 
+
+### 5.4 Scheme-source templates
+
+Some provider attributes are Scheme source that tofuix must not evaluate
+(for example `guix_blueprint`'s `secrets`).  Keep that code in a template
+file and fill in the tofu-computed pieces with `{{name}}` placeholders:
+
+```scheme
+(resource 'guix_blueprint 'pi3
+  (secrets
+   (template-file "secrets.tmpl.scm"
+                  `(("age-secret"  . ,#%(base64encode (format "%s\n" #^(attribute age-key 'secret_key))))
+                    ("host-secret" . ,#%(base64encode (format "%s\n" #^(attribute host-key 'private_key_openssh))))))))
+```
+
+and `secrets.tmpl.scm`:
+
+```
+(use-modules (guix secrets) (guix base64))
+
+(secrets
+  (files
+    (list
+      (secret-file
+        (destination "/etc/sops/age/keys.txt")
+        (content (base64-decode "{{age-secret}}"))))))
+```
+
+`render-template` substitutes each placeholder with its binding: a reference
+or record becomes `${address}` (an interpolation inside the surrounding
+string), a string is inserted verbatim, and numbers, booleans, and symbols
+are printed.  Unknown or unterminated placeholders are errors, and inserted
+text is never rescanned.  `template-file` reads the file relative to the
+project directory.  Templates are tofuix-side inputs (not `source_files`
+entries) and use a `.tmpl.scm` suffix so tooling does not compile them as
+modules.
 
 ## 6. Serializer
 

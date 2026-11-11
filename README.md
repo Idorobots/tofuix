@@ -67,6 +67,16 @@ reader shortcuts (`#%`, `#^`, `#^@` — `#~`/`#$` stay Guix's):
   (triggers_replace (computed-file "artifact" #~(begin (mkdir #$output)))))
 ```
 
+Provider-side Scheme source (for example `guix_blueprint`'s `secrets`) goes
+in a `.tmpl.scm` template file whose `{{name}}` placeholders are filled in
+at evaluation time:
+
+```scheme
+(secrets
+ (template-file "secrets.tmpl.scm"
+                `(("age-secret" . ,#%(base64encode (format "%s\n" #^(attribute age-key 'secret_key)))))))
+```
+
 ## Running
 
 During development, put the channel's `modules/` directory on Guix's

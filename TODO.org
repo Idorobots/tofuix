@@ -7,3 +7,5 @@ Let's combine the `eval` and `check` subcommands into a single `verify` subcomma
 * Overengineered Guix value lowering
 * Module support?
 - Verify if needed
+* Destroy subcommand
+* DONE Template file support
