@@ -3,7 +3,7 @@
 **Project:** `tofuix`, developed in the `./tofuix` git module
 (<https://github.com/Idorobots/tofuix>, already registered as a submodule).
 **Command:** `guix tofu`, delivered as a Guix channel extension.
-**Status:** M1–M3 implemented — Scheme DSL, JSON serializer, 188 SRFI-64
+**Status:** M1–M3 implemented — Scheme DSL, JSON serializer, 195 SRFI-64
 unit tests plus store-dependent runtime checks, the `examples/tls.scm` golden
 example, the `guix tofu` extension (`generate`/`build`/`validate`/`plan`/
 `apply`/`output`, working-directory and lock management, `--tool` selection),
@@ -681,7 +681,9 @@ Execution model:
   from `ci/channels.scm`, bootstrap it with `guix time-machine`, then run
   `make check` and `make check-runtime` against the pinned channel.
 - Manual acceptance per release: `examples/` cover a plain cloud-style
-  configuration and a lowered-artifact configuration.
+  configuration, a lowered-artifact configuration, and a deployment
+  configuration exercising variables, references, and Guix lowering
+  (`examples/deployment.scm`).
 
 
 ## 12. Milestones and acceptance criteria

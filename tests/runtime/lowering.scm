@@ -162,4 +162,17 @@
          (lambda () (lower-value (make-opaque) store) #f)
          (lambda (key message) (string? message))))
 
+;;; The deployment example lowers end to end: Guix values become store
+;;; paths, references serialize to their tofu expressions.
+(let-values (((configuration session)
+              (tofu-evaluate-file "examples/deployment.scm")))
+  (let ((json (tofu-configuration->json
+               (lower-configuration configuration store #:session session))))
+    (check "the deployment example lowers and serializes"
+           (and (string-contains json "-greeting.txt")
+                (string-contains json "-hello-")
+                (string-contains json "\"${var.region}\"")
+                (string-contains json
+                                  "\"${tls_private_key.deploy.public_key_openssh}\"")))))
+
 (display "All runtime lowering checks passed.\n")

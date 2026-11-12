@@ -1,29 +1,46 @@
 # tofuix
 
 Infrastructure as code for Guix: describe OpenTofu infrastructure in Guile
-Scheme, generate the JSON configuration, and run the selected tool.
+Scheme, use Guix values — files, packages, operating systems — directly as
+argument values, and let `guix tofu` serialize the configuration and run
+the tool.
 
 ## Example
 
+From `examples/deployment.scm`:
+
 ```scheme
-(use-modules (tofuix))
+(use-modules (gnu packages) (guix gexp) (tofuix))
 
 (define deploy-key
   (resource tls_private_key deploy
     (algorithm "ED25519")))
 
-(define public-key
-  (output public-key
-    (attribute deploy-key public_key_openssh)))
+(define region
+  (variable region
+    (type "string")
+    (default "eu-central-1")))
+
+(define greeting
+  (plain-file "greeting.txt" "hello from tofuix\n"))
 
 (define infrastructure
   (configuration
     (provider tls "hashicorp/tls" "~> 4.0")
+    region
     deploy-key
-    public-key))
+    (resource terraform_data deployment
+      (input (obj greeting greeting
+                  region (attribute region)))
+      (triggers_replace greeting))
+    (resource terraform_data tools
+      (input (specification->package "hello")))
+    (output public-key
+      (attribute deploy-key public_key_openssh))))
 ```
 
-`(tofu-configuration->json infrastructure)` returns:
+`guix tofu generate -f examples/deployment.scm` prints (store paths are
+prospective; `build` and `apply` realize them first):
 
 ```json
 {
@@ -33,6 +50,18 @@ Scheme, generate the JSON configuration, and run the selected tool.
     }
   },
   "resource": {
+    "terraform_data": {
+      "deployment": {
+        "input": {
+          "greeting": "/gnu/store/rlfrk45slmm21bngrbh2s77lp2ds98nk-greeting.txt",
+          "region": "${var.region}"
+        },
+        "triggers_replace": "/gnu/store/rlfrk45slmm21bngrbh2s77lp2ds98nk-greeting.txt"
+      },
+      "tools": {
+        "input": "/gnu/store/z41alj60i5a0jvbl56s0nj4h6gnrwn5v-hello-2.12.3"
+      }
+    },
     "tls_private_key": {
       "deploy": {
         "algorithm": "ED25519"
@@ -46,32 +75,62 @@ Scheme, generate the JSON configuration, and run the selected tool.
         "version": "~> 4.0"
       }
     }
+  },
+  "variable": {
+    "region": {
+      "default": "eu-central-1",
+      "type": "string"
+    }
   }
 }
 ```
 
-Resources are first-class Scheme values, so references stay in Scheme:
-`(attribute resource name)` yields an unevaluated OpenTofu expression, and a
-resource used directly as an argument value becomes a whole-object
-reference. Nested blocks use `(obj key value ...)` or plain association
-lists (objects); vectors are arrays, so `()` is `{}` and `#()` is `[]`.
-Guix values (file-like objects, packages) are lowered to store paths.
-Types, names, obj keys, and attribute steps are raw identifiers written
-without quotes: `(resource tls_private_key deploy (algorithm "ED25519"))`.
+## The language
 
-When a value needs Terraform functions or mixes Scheme data with
-Terraform-computed values, use the gexp-like expression layer and its
-reader shortcuts (`#%`, `#^`, `#^@` — `#~`/`#$` stay Guix's):
+- Identifier positions — resource and data types and names, provider,
+  variable, output and local names, `obj` keys, `attribute` steps — are
+  raw, unquoted identifiers; everything else is an ordinary Scheme
+  expression.
+- Objects are association lists or `(obj key value ...)`; vectors are
+  arrays, so `()` is `{}` and `#()` is `[]`.
+- References stay in Scheme: `(attribute deploy-key public_key_openssh)`
+  yields `${tls_private_key.deploy.public_key_openssh}`, variables and
+  locals are referenced the same way, and a resource used directly as an
+  argument value becomes a whole-object reference. `(ref "module.vpc")`
+  is the escape hatch for addresses tofuix did not build.
+- Values that need Terraform functions or mix Scheme data with
+  Terraform-computed values use the gexp-like expression layer and its
+  reader shortcuts (`#%`, `#^`, `#^@` — `#~`/`#$` stay Guix's):
 
 ```scheme
-(resource terraform_data example
-  (input #%(jsonencode #^(obj name "x" tags (vector "a" "b")))))
-  (triggers_replace (computed-file "artifact" #~(begin (mkdir #$output)))))
+(input #%(jsonencode #^(obj name "x" tags (vector "a" "b"))))
 ```
 
-Provider-side Scheme source (for example `guix_blueprint`'s `secrets`) goes
-in a `.tmpl.scm` template file whose `{{name}}` placeholders are filled in
-at evaluation time:
+## Guix interop
+
+Guix values are ordinary argument values; `guix tofu` lowers them before
+serialization:
+
+- file-like objects and packages lower to store paths — prospective for
+  `generate`/`plan`/`validate`, realized for `build`/`apply`;
+- named Guix records — operating systems, images, machines, and other
+  exported records — cross the boundary **by name**, so a provider can
+  re-evaluate them in its own environment:
+
+```scheme
+(use-modules (tofuix) (hosts rpi3))
+
+(resource guix_blueprint pi3
+  (os rpi3-os))                  ; -> "(@ (hosts rpi3) rpi3-os)"
+```
+
+  An imported binding resolves to its canonical module reference; a value
+  defined in the infrastructure file itself renders from its captured
+  source. `(guile '(hosts rpi3) 'rpi3-os)` is the explicit form for
+  values that are not loaded or not exported.
+- provider-side Scheme source (for example `guix_blueprint`'s `secrets`)
+  goes in a `.tmpl.scm` template file whose `{{name}}` placeholders are
+  filled in at evaluation time:
 
 ```scheme
 (secrets
@@ -79,64 +138,55 @@ at evaluation time:
                 `(("age-secret" . ,#%(base64encode (format "%s\n" #^(attribute age-key secret_key)))))))
 ```
 
+One gotcha: builder scripts that use `#$output` belong in modules that do
+not import `(tofuix)`, because the `output` constructor macro shadows the
+gexp builder variable; see `examples/artifact.scm`.
+
 ## Running
 
 During development, put the channel's `modules/` directory on Guix's
-extension search path:
+extension search path; once tofuix is installed as a channel, plain
+`guix tofu` works without it:
 
 ```sh
-GUIX_EXTENSIONS_PATH=$PWD/modules guix tofu generate -f examples/tls.scm
-GUIX_EXTENSIONS_PATH=$PWD/modules guix tofu plan -f infrastructure.scm
+GUIX_EXTENSIONS_PATH=$PWD/modules guix tofu plan -f examples/deployment.scm
 ```
+
+| Command | Purpose |
+|---|---|
+| `generate` | Evaluate the infrastructure file and print its JSON configuration |
+| `build` | As `generate`, realize required Guix artifacts, and write the configuration |
+| `validate` | Generate, then `tofu init -backend=false` and `tofu validate` |
+| `plan` | Generate, initialize providers, then `tofu plan` |
+| `apply` | As `plan` with realization, then `tofu apply` |
+| `destroy` | Generate, initialize providers, then `tofu destroy` (realizes nothing) |
+| `output` | Print outputs from existing state (`-json` unless a name is given) |
+
+Common options: `-f, --file=FILE` (default `infrastructure.scm`),
+`-L, --load-path=DIR`, `--tool=tofu|terraform`, `-C, --chdir=DIR`.
+Arguments after `--` and unknown options are forwarded to the tool.
 
 `guix tofu` evaluates the infrastructure file, writes `.tofuix/main.tf.json`
-next to it, and runs `tofu` — or `terraform` with `--tool=terraform` — in that
-directory; when no `tofu` is on `PATH`, it builds the channel's pinned
-`opentofu` package instead.  Modules resolve without `-L` flags: channels of
-the invoking `guix` are on the load path already, and the infrastructure
-file's directory and the current directory are searched automatically
-(`-L` adds entries ahead of those).  The provider lock file, state, and
-provider cache stay untouched across regenerations.  Commands: `generate`,
-`build` (also realizes required Guix artifacts), `validate` (`tofu init
--backend=false` and `tofu validate`), `plan`, `apply`, `destroy`
-(generate, init, then `tofu destroy` — realizes nothing), and `output`; unknown
-options and arguments after `--` are forwarded to the tool.  Once tofuix is
-installed as a channel, plain `guix tofu` works without the environment
-variable.
+next to it, and runs `tofu` — or `terraform` with `--tool=terraform` — in
+that directory; when no `tofu` is on `PATH`, it builds the channel's pinned
+`opentofu` package instead. The provider lock file, state, and provider
+cache stay untouched across regenerations.
 
-Guix objects can be used directly as argument values: file-like objects and
-packages are lowered to store paths before serialization, prospective paths
-for `generate`/`plan`/`validate`, realized ones for `build`/`apply`:
+Modules resolve without `-L` flags: the channels of the invoking `guix`
+are already on the load path, and the infrastructure file's directory and
+the current directory are searched automatically (`-L` adds entries ahead
+of those).
 
-```scheme
-(use-modules (tofuix) (guix gexp))
+## Programmatic use
 
-(configuration
-  (resource terraform_data artifact
-    (input (plain-file "greeting.txt" "hello from tofuix"))))
+Configurations are ordinary Scheme values: `tofu-configuration->json`
+from `(tofuix serializer)` serializes one, after lowering any Guix values
+with `lower-configuration` from `(tofuix lower)`.
+
+```sh
+guile -L modules -L . -c '(use-modules (tofuix serializer) (examples tls)) \
+  (display (tofu-configuration->json infrastructure))'
 ```
-
-Builder scripts that use `#$output` belong in modules that do not import
-`(tofuix)`, because the `output` constructor macro shadows the gexp builder
-variable; see `examples/artifact.scm`.
-
-Named Guix records that have no store form — operating systems, images,
-machines, and other exported records — cross the boundary **by name**, so a
-provider can re-evaluate them in its own environment:
-
-```scheme
-(use-modules (tofuix) (hosts rpi3))
-
-(configuration
-  (resource guix_blueprint pi3
-    (os rpi3-os)))                  ; -> "(@ (hosts rpi3) rpi3-os)"
-```
-
-An imported binding resolves to its canonical module reference; a value
-defined in the infrastructure file itself is rendered from its captured
-source, prefixed with the modules the file imported. Only the file's direct
-imports and its own bindings are searched; `(guile '(hosts rpi3) 'rpi3-os)`
-is the explicit form for values that are not loaded or not exported.
 
 ## Development
 
@@ -150,13 +200,6 @@ make check-runtime  # store-dependent lowering checks (needs a daemon)
 CI installs Guix, emits an exact-commit channel list from `ci/channels.scm`,
 bootstraps it with `guix time-machine`, and runs both targets against the
 pinned channel.
-
-Load path for interactive use and examples:
-
-```sh
-guile -L modules -L . -c '(use-modules (tofuix) (examples tls)) \
-  (display (tofu-configuration->json infrastructure))'
-```
 
 ## License
 
