@@ -115,7 +115,100 @@
   (delete-directory directory))
 
 (let* ((directory (make-temp-directory))
-       (file (in-vicinity directory "infrastructure.scm")))
+        (hosts (in-vicinity directory "hosts"))
+        (file (in-vicinity directory "infrastructure.scm")))
+  (mkdir hosts)
+  (write-file (in-vicinity hosts "alpha.scm") "\
+(define-module (hosts alpha)
+  #:export (alpha-os))
+
+(define alpha-os \"file-directory-reference\")
+")
+  (write-file file "\
+(use-modules (tofuix) (hosts alpha))
+
+(configuration (local os alpha-os))
+")
+  (test-equal "the infrastructure file's directory is on the load path"
+    "file-directory-reference"
+    (let-values (((configuration session)
+                  (tofu-evaluate-file file)))
+      (let ((local (car (tofu-configuration-locals configuration))))
+        (tofu-local-value local))))
+  (delete-directory directory))
+
+(let* ((directory (make-temp-directory))
+        (file (in-vicinity (in-vicinity directory "nested")
+                           "infrastructure.scm")))
+  (mkdir (in-vicinity directory "nested"))
+  (mkdir (in-vicinity directory "hosts"))
+  (write-file (in-vicinity (in-vicinity directory "hosts") "beta.scm") "\
+(define-module (hosts beta)
+  #:export (beta-os))
+
+(define beta-os \"cwd-reference\")
+")
+  (write-file file "\
+(use-modules (tofuix) (hosts beta))
+
+(configuration (local os beta-os))
+")
+  (let ((saved-cwd (getcwd)))
+    (dynamic-wind
+      (const #t)
+      (lambda ()
+        (chdir directory)
+        (test-equal "the current working directory is on the load path"
+          "cwd-reference"
+          (let-values (((configuration session)
+                        (tofu-evaluate-file file)))
+            (let ((local (car (tofu-configuration-locals configuration))))
+              (tofu-local-value local)))))
+      (lambda () (chdir saved-cwd))))
+  (delete-directory directory))
+
+(let* ((directory (make-temp-directory))
+        (override (make-temp-directory))
+        (hosts (in-vicinity directory "hosts"))
+        (file (in-vicinity directory "infrastructure.scm")))
+  (mkdir hosts)
+  (mkdir (in-vicinity override "hosts"))
+  (write-file (in-vicinity hosts "gamma.scm") "\
+(define-module (hosts gamma)
+  #:export (gamma-os))
+
+(define gamma-os \"file-directory\")
+")
+  (write-file (in-vicinity (in-vicinity override "hosts") "gamma.scm") "\
+(define-module (hosts gamma)
+  #:export (gamma-os))
+
+(define gamma-os \"explicit-load-path\")
+")
+  (write-file file "\
+(use-modules (tofuix) (hosts gamma))
+
+(configuration (local os gamma-os))
+")
+  ;; Evaluation happens with DIRECTORY as the working directory, so the
+  ;; file's directory would otherwise win.
+  (let ((saved-cwd (getcwd)))
+    (dynamic-wind
+      (const #t)
+      (lambda ()
+        (chdir directory)
+        (test-equal "explicit load path entries shadow the file directory"
+          "explicit-load-path"
+          (let-values (((configuration session)
+                        (tofu-evaluate-file file #:load-path (list override))))
+            (let ((local (car (tofu-configuration-locals configuration))))
+              (tofu-local-value local)))))
+      (lambda () (chdir saved-cwd))))
+  (delete-directory directory)
+  (delete-directory override))
+
+(let* ((directory (make-temp-directory))
+        (file (in-vicinity directory "infrastructure.scm")))
   (write-file file "\
 (define-module (fixtures defined-infrastructure)
   #:use-module (tofuix)

@@ -73,6 +73,14 @@ other forms are not."
       (else #f)))
     (_ #f)))
 
+(define (delete-duplicates entries)
+  "Return ENTRIES with later duplicates removed, preserving order."
+  (let loop ((rest entries) (acc '()))
+    (cond
+     ((null? rest) (reverse acc))
+     ((member (car rest) acc) (loop (cdr rest) acc))
+     (else (loop (cdr rest) (cons (car rest) acc))))))
+
 (define* (tofu-evaluate-file file #:key (load-path '()) (binding %default-binding))
   "Evaluate FILE and return two values: the <tofu-configuration> it
 produces and the evaluation session.
@@ -80,9 +88,13 @@ produces and the evaluation session.
 FILE runs in a fresh module, with LOAD-PATH prepended to the Guile load
 path and with the directory containing FILE as the current directory, so
 relative file references inside the infrastructure file resolve against
-the project root.  The configuration is the value of FILE's last
-expression or, when that expression is a definition, the value of the
-top-level BINDING (default: infrastructure).
+the project root.  The directory containing FILE and the current working
+directory are implicitly appended after LOAD-PATH, so project modules
+such as (hosts rpi3) are loadable without explicit -L flags; inherited
+entries (Guix and its channels) keep their position after those.  The
+configuration is the value of FILE's last expression or, when that
+expression is a definition, the value of the top-level BINDING (default:
+infrastructure).
 
 The session carries the final evaluation module and the captured source of
 the file's top-level defines; lowering uses it to resolve where named Guix
@@ -98,7 +110,12 @@ values come from."
                              (if (absolute-file-name? entry)
                                  entry
                                  (in-vicinity (getcwd) entry))))
-                          load-path))
+                           load-path))
+          ;; The file's directory and the current working directory are
+          ;; searched after explicit -L entries and before the inherited
+          ;; load path (Guix and its channels).
+          (implicit-path (delete-duplicates (list directory (getcwd))))
+          (search-path (append load-path implicit-path))
           (module    (make-fresh-user-module))
           (saved-cwd (getcwd))
           (saved-path (absolute-load-path %load-path))
@@ -107,7 +124,7 @@ values come from."
           (evaluated #f))
     (dynamic-wind
       (lambda ()
-        (set! %load-path (append load-path saved-path))
+        (set! %load-path (append search-path saved-path))
         (chdir directory))
       (lambda ()
         (save-module-excursion

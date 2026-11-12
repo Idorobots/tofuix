@@ -92,9 +92,12 @@ GUIX_EXTENSIONS_PATH=$PWD/modules guix tofu plan -f infrastructure.scm
 `guix tofu` evaluates the infrastructure file, writes `.tofuix/main.tf.json`
 next to it, and runs `tofu` — or `terraform` with `--tool=terraform` — in that
 directory; when no `tofu` is on `PATH`, it builds the channel's pinned
-`opentofu` package instead.  The provider lock file, state, and provider
-cache stay untouched across regenerations.  Commands: `generate`, `build`
-(also realizes required Guix artifacts), `validate` (`tofu init
+`opentofu` package instead.  Modules resolve without `-L` flags: channels of
+the invoking `guix` are on the load path already, and the infrastructure
+file's directory and the current directory are searched automatically
+(`-L` adds entries ahead of those).  The provider lock file, state, and
+provider cache stay untouched across regenerations.  Commands: `generate`,
+`build` (also realizes required Guix artifacts), `validate` (`tofu init
 -backend=false` and `tofu validate`), `plan`, `apply`, and `output`; unknown
 options and arguments after `--` are forwarded to the tool.  Once tofuix is
 installed as a channel, plain `guix tofu` works without the environment

@@ -48,7 +48,10 @@ Commands:
 
 Options:
   -f, --file=FILE       Infrastructure file (default: infrastructure.scm)
-  -L, --load-path=DIR   Prepend DIR to the Guile load path (repeatable)
+  -L, --load-path=DIR   Prepend DIR to the Guile load path (repeatable);
+                        channel modules are already on it, and the
+                        infrastructure file's directory and the current
+                        directory are searched automatically
       --tool=NAME       Tool to run: tofu (default) or terraform
   -C, --chdir=DIR       Run as if started in DIR
   -h, --help            Show this help

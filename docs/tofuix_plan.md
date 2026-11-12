@@ -560,12 +560,17 @@ remains provider-agnostic — tofuix merely produces a canonical name for a
 named Guix value, exactly as it produces a store path for a file-like
 object, without knowing what any provider does with it.
 
-This requires the defining modules to be loadable in the tofuix session;
-`guix tofu -L/--load-path` (section 8) prepends directories to the load
-path when evaluating the infrastructure file. The extension does **not**
-wrap evaluation in `guix time-machine` itself: users run
-`guix time-machine -C channels-lock.scm -- guix tofu -L ...` when they
-need evaluation at pinned channel revisions. The modules the provider must
+This requires the defining modules to be loadable in the tofuix session.
+Evaluation inherits the load path of the invoking `guix` process, so
+modules from every channel of the active profile (or of the pinned profile
+of a `guix time-machine` wrapper) are available without flags. Project
+modules resolve through implicit load-path entries: the directory
+containing the infrastructure file and the current working directory
+(section 8); `-L/--load-path` entries are searched before those. The
+extension does **not** wrap evaluation in `guix time-machine` itself:
+users run
+`guix time-machine -C channels-lock.scm -- guix tofu ...` when they need
+evaluation at pinned channel revisions. The modules the provider must
 load are shipped through the blueprint's `source_files`.
 
 ## 8. Command set
@@ -586,9 +591,12 @@ Common options:
 
 - `-f/--file` (default `infrastructure.scm` in the project root);
 - `-L/--load-path` (repeatable, Guix convention): directories prepended to
-  the load path when evaluating the infrastructure file — this is how
-  project and channel modules such as `(hosts rpi3)` become loadable in the
-  tofuix session (section 7.1);
+  the load path when evaluating the infrastructure file. They are searched
+  before two implicit entries: the infrastructure file's directory and the
+  current working directory, which make project modules such as
+  `(hosts rpi3)` loadable without flags (section 7.1). Channel modules are
+  always available: `guix` puts the channels of its profile on the load
+  path before invoking the extension;
 - `--tool=tofu|terraform`, `-C`/`--chdir`, `--`;
 - pass-through arguments forwarded to the underlying tofu command
   (e.g. `-target`, `-var`). `-L` is consumed by tofuix itself, not
@@ -597,7 +605,7 @@ Common options:
 Example:
 
 ```sh
-guix tofu plan -L . -L ../spartan-guix/modules -f infrastructure.scm
+guix tofu plan -f infra/infrastructure.scm
 ```
 
 ## 9. Working directory and state
@@ -694,4 +702,4 @@ All questions raised during planning are resolved:
 | Packaging `terraform` | No; `opentofu` is packaged as the default tool. When `--tool=terraform` is selected, the binary must be on `PATH` |
 | Test runner | Plain Makefile-based runner (`make check` runs each SRFI-64 suite directly); no `guix test` dependency |
 | Provider-side secret flows | Out of scope. `guix secrets image`/`guix secrets deploy` and similar stay with the provider; tofuix only generates Terraform JSON and runs the selected tool |
-| Pinned-channel evaluation | No `guix time-machine` wrapper inside the extension. `-L/--load-path` covers project modules; users wrap the whole invocation (`guix time-machine -C channels-lock.scm -- guix tofu ...`) when they need evaluation at pinned channel revisions |
+| Pinned-channel evaluation | No `guix time-machine` wrapper inside the extension. Channel modules are inherited from the invoking `guix` process, and project modules resolve through the implicit file-directory/current-directory load-path entries; users wrap the whole invocation (`guix time-machine -C channels-lock.scm -- guix tofu ...`) when they need evaluation at pinned channel revisions |
