@@ -107,7 +107,7 @@
   (write-file file "\
 (use-modules (tofuix))
 
-(configuration (resource 'terraform_data 'example (input \"built\")))
+(configuration (resource terraform_data example (input \"built\")))
 ")
   (set! output
         (with-output-to-string

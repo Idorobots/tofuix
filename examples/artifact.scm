@@ -18,5 +18,5 @@
 
 (define infrastructure
   (configuration
-    (resource 'terraform_data 'artifact
+    (resource terraform_data artifact
       (input greeting))))

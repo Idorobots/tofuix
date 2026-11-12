@@ -15,7 +15,7 @@
 
 (test-equal "resource macro matches the programmatic API"
   '("tls_private_key" "deploy" (("algorithm" . "ED25519")))
-  (let ((r (resource 'tls_private_key 'deploy (algorithm "ED25519"))))
+  (let ((r (resource tls_private_key deploy (algorithm "ED25519"))))
     (list (tofu-resource-type r)
           (tofu-resource-name r)
           (tofu-resource-arguments r))))
@@ -30,14 +30,14 @@
 
 (test-equal "data macro matches the programmatic API"
   '("aws_ami" "server" (("most_recent" . #t)))
-  (let ((d (data 'aws_ami 'server (most_recent #t))))
+  (let ((d (data aws_ami server (most_recent #t))))
     (list (tofu-data-type d)
           (tofu-data-name d)
           (tofu-data-arguments d))))
 
 (test-equal "provider without version or arguments"
   '("tls" "hashicorp/tls" #f ())
-  (let ((p (provider 'tls "hashicorp/tls")))
+  (let ((p (provider tls "hashicorp/tls")))
     (list (tofu-provider-name p)
           (tofu-provider-source p)
           (tofu-provider-version p)
@@ -45,7 +45,7 @@
 
 (test-equal "provider with version"
   '("tls" "hashicorp/tls" "~> 4.0" ())
-  (let ((p (provider 'tls "hashicorp/tls" "~> 4.0")))
+  (let ((p (provider tls "hashicorp/tls" "~> 4.0")))
     (list (tofu-provider-name p)
           (tofu-provider-source p)
           (tofu-provider-version p)
@@ -53,7 +53,7 @@
 
 (test-equal "provider with arguments"
   '("aws" "hashicorp/aws" #f (("region" . "eu-central-1")))
-  (let ((p (provider 'aws "hashicorp/aws" (region "eu-central-1"))))
+  (let ((p (provider aws "hashicorp/aws" (region "eu-central-1"))))
     (list (tofu-provider-name p)
           (tofu-provider-source p)
           (tofu-provider-version p)
@@ -61,7 +61,7 @@
 
 (test-equal "provider with version and arguments"
   '("aws" "hashicorp/aws" "~> 6.0" (("region" . "eu-central-1")))
-  (let ((p (provider 'aws "hashicorp/aws" "~> 6.0"
+  (let ((p (provider aws "hashicorp/aws" "~> 6.0"
                      (region "eu-central-1"))))
     (list (tofu-provider-name p)
           (tofu-provider-source p)
@@ -70,7 +70,7 @@
 
 (test-equal "variable macro matches the programmatic API"
   '("region" (("type" . "string") ("default" . "eu-central-1")))
-  (let ((v (variable 'region
+  (let ((v (variable region
                      (type "string")
                      (default "eu-central-1"))))
     (list (tofu-variable-name v)
@@ -78,7 +78,7 @@
 
 (test-equal "output macro matches the programmatic API"
   '("public-key" "value" (("description" . "SSH public key")))
-  (let ((o (output 'public-key "value"
+  (let ((o (output public-key "value"
                    (description "SSH public key"))))
     (list (tofu-output-name o)
           (tofu-output-value o)
@@ -86,43 +86,49 @@
 
 (test-equal "output value is positional"
   '("public-key" "value" ())
-  (let ((o (output 'public-key "value")))
+  (let ((o (output public-key "value")))
     (list (tofu-output-name o)
           (tofu-output-value o)
           (tofu-output-fields o))))
 
 (test-equal "local macro matches the programmatic API"
   '("name" "value")
-  (let ((l (local 'name "value")))
+  (let ((l (local name "value")))
     (list (tofu-local-name l)
           (tofu-local-value l))))
 
+(test-error "quoted identifiers in resource are rejected" #t
+  (resource 'tls_private_key 'deploy))
+
+(test-error "quoted obj keys are rejected" #t
+  (obj 'a 1))
+
 (test-equal "obj builds a nested association list"
   '(("a" . 1) ("b" . (("c" . 2))))
-  (obj 'a 1 'b (obj 'c 2)))
+  (obj a 1 b (obj c 2)))
 
 (test-error "obj rejects an odd number of arguments" #t
-  (obj 'a))
+  (obj a))
 
 (test-error "obj rejects invalid keys" #t
   (obj 1 2))
 
 (test-equal "multi-value tuple becomes a vector"
   '(("tags" . #("a" "b")))
-  (tofu-resource-arguments (resource 'x 'y (tags "a" "b"))))
+  (tofu-resource-arguments (resource x y (tags "a" "b"))))
 
 (test-equal "single vector value is evaluated"
   '(("tags" . #("a" "b")))
-  (tofu-resource-arguments (resource 'x 'y (tags (vector "a" "b")))))
+  (tofu-resource-arguments (resource x y (tags (vector "a" "b")))))
 
 (test-equal "configuration classifies and orders elements"
   '(("tls" "hashicorp/tls")
     ("tls_private_key" "deploy")
     ("public-key"))
   (let ((config (configuration
-                 (provider 'tls "hashicorp/tls")
-                 (resource 'tls_private_key 'deploy)
-                 (output 'public-key "value"))))
+                 (provider tls "hashicorp/tls")
+                 (resource tls_private_key deploy)
+                 (output public-key "value"))))
     (append
      (map (lambda (p)
             (list (tofu-provider-name p) (tofu-provider-source p)))
@@ -136,35 +142,35 @@
 (test-equal "configuration splices lists of elements"
   '("a" "b" "c")
   (let ((config (configuration
-                 (list (resource 'a 'one)
-                       (resource 'b 'two))
-                 (resource 'c 'three))))
+                 (list (resource a one)
+                       (resource b two))
+                 (resource c three))))
     (map (lambda (r) (tofu-resource-type r))
          (tofu-configuration-resources config))))
 
 (test-error "duplicate provider" #t
-  (configuration (provider 'tls "hashicorp/tls")
-                 (provider 'tls "hashicorp/tls")))
+  (configuration (provider tls "hashicorp/tls")
+                 (provider tls "hashicorp/tls")))
 
 (test-error "duplicate resource" #t
-  (configuration (resource 'tls_private_key 'deploy (a "1"))
-                 (resource 'tls_private_key 'deploy (a "2"))))
+  (configuration (resource tls_private_key deploy (a "1"))
+                 (resource tls_private_key deploy (a "2"))))
 
 (test-error "duplicate data source" #t
-  (configuration (data 'aws_ami 'server)
-                 (data 'aws_ami 'server)))
+  (configuration (data aws_ami server)
+                 (data aws_ami server)))
 
 (test-error "duplicate variable" #t
-  (configuration (variable 'region)
-                 (variable 'region)))
+  (configuration (variable region)
+                 (variable region)))
 
 (test-error "duplicate output" #t
-  (configuration (output 'x "1")
-                 (output 'x "2")))
+  (configuration (output x "1")
+                 (output x "2")))
 
 (test-error "duplicate local" #t
-  (configuration (local 'x "1")
-                 (local 'x "2")))
+  (configuration (local x "1")
+                 (local x "2")))
 
 (test-equal "terraform and backend root blocks"
   '(("terraform" ("required_version" . ">= 1.6"))
@@ -172,7 +178,7 @@
   (tofu-configuration-root-blocks
    (configuration
     (terraform (required_version ">= 1.6"))
-    (backend (local (obj 'path "state.json"))))))
+    (backend (local (obj path "state.json"))))))
 
 (test-error "duplicate root block" #t
   (configuration (terraform (required_version ">= 1.6"))
@@ -185,10 +191,10 @@
   (tofu-resource "a" "b" #:arguments '(("x" . 1) 2)))
 
 (test-error "duplicate resource argument" #t
-  (resource 'x 'y (a "1") (a "2")))
+  (resource x y (a "1") (a "2")))
 
 (test-error "duplicate obj key" #t
-  (obj 'a 1 'a 2))
+  (obj a 1 a 2))
 
 (test-error "provider source must be a string" #t
   (tofu-provider 'tls 'hashicorp/tls))

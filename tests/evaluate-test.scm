@@ -46,7 +46,7 @@
 (use-modules (tofuix))
 
 (define infrastructure
-  (configuration (resource 'terraform_data 'example (input \"hello\"))))
+  (configuration (resource terraform_data example (input \"hello\"))))
 ")
   (let-values (((configuration session) (tofu-evaluate-file file)))
     (test-assert "a file defining infrastructure yields it"
@@ -63,7 +63,7 @@
   (write-file file "\
 (use-modules (tofuix))
 
-(configuration (resource 'terraform_data 'last (input \"expression\")))
+(configuration (resource terraform_data last (input \"expression\")))
 ")
   (test-equal "the value of the last expression is used"
     "expression"
@@ -79,7 +79,7 @@
 (use-modules (tofuix) (ice-9 textual-ports))
 
 (configuration
-  (local 'data (call-with-input-file \"data.txt\" get-string-all)))
+  (local data (call-with-input-file \"data.txt\" get-string-all)))
 ")
   (test-equal "relative file references resolve against the project root"
     "relative contents"
@@ -104,7 +104,7 @@
   (write-file file "\
 (use-modules (tofuix) (hosts rpi3))
 
-(configuration (local 'os rpi3-os))
+(configuration (local os rpi3-os))
 ")
   (test-equal "load paths make project modules loadable"
     "blueprint-reference"
@@ -122,7 +122,7 @@
   #:export (infrastructure))
 
 (define infrastructure
-  (configuration (resource 'terraform_data 'defined (input \"defined\"))))
+  (configuration (resource terraform_data defined (input \"defined\"))))
 ")
   (test-equal "a define-module file is found through its binding"
     "defined"
@@ -151,7 +151,7 @@
 (define a-value (list 'captured))
 (define (a-function x) x)
 
-(configuration (resource 'terraform_data 'session (input \"x\")))
+(configuration (resource terraform_data session (input \"x\")))
 ")
   (let-values (((configuration session) (tofu-evaluate-file file)))
     (test-equal "the session captures the source of plain defines"

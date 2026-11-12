@@ -17,39 +17,39 @@
 (test-equal "attribute of a resource"
   "tls_private_key.deploy.public_key_openssh"
   (tofu-ref-path
-   (attribute (resource 'tls_private_key 'deploy) 'public_key_openssh)))
+   (attribute (resource tls_private_key deploy) public_key_openssh)))
 
 (test-equal "attribute chains"
   "aws_instance.server.network_interface.address"
   (tofu-ref-path
-   (attribute (attribute (resource 'aws_instance 'server)
-                         'network_interface)
-              'address)))
+   (attribute (attribute (resource aws_instance server)
+                         network_interface)
+              address)))
 
 (test-equal "attribute indexes"
   "aws_instance.server.addresses[0]"
   (tofu-ref-path
-   (attribute (resource 'aws_instance 'server) 'addresses 0)))
+   (attribute (resource aws_instance server) addresses 0)))
 
 (test-equal "attribute of a variable"
   "var.region"
-  (tofu-ref-path (attribute (variable 'region))))
+  (tofu-ref-path (attribute (variable region))))
 
 (test-equal "attribute of a local"
   "local.name"
-  (tofu-ref-path (attribute (local 'name "value"))))
+  (tofu-ref-path (attribute (local name "value"))))
 
 (test-equal "attribute of a data source"
   "data.aws_ami.server.id"
-  (tofu-ref-path (attribute (data 'aws_ami 'server) 'id)))
+  (tofu-ref-path (attribute (data aws_ami server) id)))
 
 (test-equal "attribute extends a reference"
   "module.vpc.vpc_id"
-  (tofu-ref-path (attribute (ref "module.vpc") 'vpc_id)))
+  (tofu-ref-path (attribute (ref "module.vpc") vpc_id)))
 
 (test-equal "string steps are attribute names"
   "aws_instance.server.id"
-  (tofu-ref-path (attribute (resource 'aws_instance 'server) "id")))
+  (tofu-ref-path (attribute (resource aws_instance server) "id")))
 
 (test-equal "reference interpolation"
   "${module.vpc.vpc_id}"
@@ -63,13 +63,13 @@
   (ref 42))
 
 (test-error "attribute rejects non-referencable objects" #t
-  (attribute "not a record" 'field))
+  (attribute "not a record" field))
 
 (test-error "attribute rejects invalid steps" #t
-  (attribute (variable 'region) 1.5))
+  (attribute (variable region) 1.5))
 
-(define test-resource (resource 'test_thing 'example (id "value")))
-(define test-ref (attribute test-resource 'id))
+(define test-resource (resource test_thing example (id "value")))
+(define test-ref (attribute test-resource id))
 
 (test-equal "tf compiles an application"
   "merge({ \"a\" = \"b\" })"

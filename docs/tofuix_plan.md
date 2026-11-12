@@ -3,7 +3,7 @@
 **Project:** `tofuix`, developed in the `./tofuix` git module
 (<https://github.com/Idorobots/tofuix>, already registered as a submodule).
 **Command:** `guix tofu`, delivered as a Guix channel extension.
-**Status:** M1–M3 implemented — Scheme DSL, JSON serializer, 186 SRFI-64
+**Status:** M1–M3 implemented — Scheme DSL, JSON serializer, 188 SRFI-64
 unit tests plus store-dependent runtime checks, the `examples/tls.scm` golden
 example, the `guix tofu` extension (`generate`/`build`/`validate`/`plan`/
 `apply`/`output`, working-directory and lock management, `--tool` selection),
@@ -186,12 +186,12 @@ Two layers, both in `(tofuix)`:
 | Record (v1) | Constructor | Purpose |
 |---|---|---|
 | `tofu-configuration` | `(configuration ELEM...)` | Root object (the OpenTofu "configuration"); flat sequence of providers, resources, outputs, variables, locals, root blocks |
-| `tofu-provider` | `(provider 'tls "hashicorp/tls" "~> 4.0")` | Required provider declaration (name, source, optional version) |
-| `tofu-variable` | `(variable 'region (type "string") (default "eu-central-1"))` | Input variable with type/default/validation tuples |
-| `tofu-resource` | `(resource 'tls_private_key 'deploy (algorithm "ED25519"))` | Managed resource (type, name, argument tuples) |
-| `tofu-data` | `(data 'aws_ami 'server (most_recent #t))` | Data source (v1.1; same shape as `resource`) |
-| `tofu-output` | `(output 'public-key VALUE (description "..."))` | Root-module output: positional value, optional field tuples (`description`, `sensitive`, `depends_on`) |
-| `tofu-local` | `(local 'bucket-name VALUE)` | Local value aliasing Scheme-computed values |
+| `tofu-provider` | `(provider tls "hashicorp/tls" "~> 4.0")` | Required provider declaration (name, source, optional version) |
+| `tofu-variable` | `(variable region (type "string") (default "eu-central-1"))` | Input variable with type/default/validation tuples |
+| `tofu-resource` | `(resource tls_private_key deploy (algorithm "ED25519"))` | Managed resource (type, name, argument tuples) |
+| `tofu-data` | `(data aws_ami server (most_recent #t))` | Data source (v1.1; same shape as `resource`) |
+| `tofu-output` | `(output public-key VALUE (description "..."))` | Root-module output: positional value, optional field tuples (`description`, `sensitive`, `depends_on`) |
+| `tofu-local` | `(local bucket-name VALUE)` | Local value aliasing Scheme-computed values |
 
 Example:
 
@@ -199,15 +199,15 @@ Example:
 (use-modules (tofuix) (tofuix expressions))
 
 (define deploy-key
-  (resource 'tls_private_key 'deploy
+  (resource tls_private_key deploy
     (algorithm "ED25519")))
 
 (define public-key
-  (output 'public-key
-    (attribute deploy-key 'public_key_openssh)))
+  (output public-key
+    (attribute deploy-key public_key_openssh)))
 
 (configuration
-  (provider 'tls "hashicorp/tls" "~> 4.0")
+  (provider tls "hashicorp/tls" "~> 4.0")
   deploy-key
   public-key)
 ```
@@ -229,14 +229,17 @@ Rules:
   procedure call. Tuple *values* are ordinary evaluated expressions, so
   `(attribute ...)`, Scheme computation, and lowered Guix objects compose
   freely.
-- Resource/data `type` and `name` are inline and positional (symbol or
-  string). Meta-arguments (`lifecycle`, `count`, `depends_on`, `provider`)
-  are ordinary tuples.
+- Identifier positions — resource/data `type` and `name`, provider,
+  variable, output and local names, `obj` keys, and `attribute` steps —
+  are **raw identifiers**, read verbatim at expansion and never evaluated:
+  `(resource tls_private_key deploy ...)`. The `tofu-`prefixed programmatic
+  constructors accept strings for generated names. Meta-arguments
+  (`lifecycle`, `count`, `depends_on`, `provider`) are ordinary tuples.
 - A tuple with several values serializes to a JSON array:
   `(availability_zones "eu-central-1a" "eu-central-1b")`.
 - Nesting uses plain data, and the object/array distinction is structural:
-  association lists (including `(obj 'k v ...)`) build objects, vectors
-  build arrays, e.g. `(create (obj 'content (obj 'url image-path)))`,
+  association lists (including `(obj k v ...)`) build objects, vectors
+  build arrays, e.g. `(create (obj content (obj url image-path)))`,
   `(availability_zones (vector "eu-central-1a" "eu-central-1b"))`.
   Consequently `()` is the empty object (`{}`) and `#()` the empty array
   (`[]`), and a non-association list is an error.
@@ -255,19 +258,20 @@ references stay in Scheme — no stringly-typed paths, no global registry.
 OpenTofu calls `TYPE.NAME.attribute` an **attribute reference**, so the
 reference constructor is named accordingly:
 
-- `(attribute RESOURCE 'attr...)` → `${TYPE.NAME.attr...}`; e.g. from the
-  example, `(attribute deploy-key 'public_key_openssh)` serializes to
+- `(attribute RESOURCE attr...)` → `${TYPE.NAME.attr...}`; e.g. from the
+  example, `(attribute deploy-key public_key_openssh)` serializes to
   `${tls_private_key.deploy.public_key_openssh}`.
 - `attribute` accepts the referencable objects: `resource` →
   `TYPE.NAME.attr...`, `data` → `data.TYPE.NAME.attr...`, `variable` →
   `var.NAME`, `local` → `local.NAME`; and it chains, since a reference is
   itself a value:
-  `(attribute (attribute server 'network_interface) 'address)`.
+  `(attribute (attribute server network_interface) address)`.
 - Traversal: multiple symbols walk attributes; integers index:
-  `(attribute iface 'addresses 0)` → `${...addresses}[0]`.
-- `attribute` is a plain procedure, so it can be used anywhere an expression
-  is expected — inside tuple values, `local`/`output` values, or nested
-  `obj` structures.
+  `(attribute iface addresses 0)` → `${...addresses}[0]`.
+- `attribute` steps are raw identifiers (like every identifier position);
+  the macro expands to the plain procedure `tofu-attribute`, so it can be
+  used anywhere an expression is expected — inside tuple values,
+  `local`/`output` values, or nested `obj` structures.
 
 Escapes and future growth:
 
@@ -300,21 +304,21 @@ same implicit dependency edge in OpenTofu:
 (use-modules (tofuix) (tofuix expressions) (hosts rpi3))
 
 (define pi3-blueprint
-  (resource 'guix_blueprint 'pi3
+  (resource guix_blueprint pi3
     (os rpi3-os)             ; -> "(@ (hosts rpi3) rpi3-os)" (see 7.1)
     (machine rpi3)           ; -> "(@ (hosts rpi3) rpi3)"
     (channels (call-with-input-file "channels-lock.scm" get-string-all))))
 
 (define pi3-host
-  (resource 'guix_host 'pi3
+  (resource guix_host pi3
     (hostname "pi3.local")
     (blueprint pi3-blueprint)             ; -> "${guix_blueprint.pi3}"
     (system "aarch64-linux")
     (ssh (obj
-          'user "root"
-          'private_key (attribute management-key 'private_key_openssh)
-          'host_key (attribute pi3-host-key 'public_key_openssh)))
-    (timeouts (obj 'create "2h" 'update "2h"))))
+          user "root"
+          private_key (attribute management-key private_key_openssh)
+          host_key (attribute pi3-host-key public_key_openssh)))
+    (timeouts (obj create "2h" update "2h"))))
 ```
 
 `ssh` and `timeouts` serialize as nested JSON objects. An explicit
@@ -328,7 +332,7 @@ also runs inside nested structures, so file-like objects may be used
 anywhere in the tree.
 
 **Inline embedding (v1.1 sugar).** A constructor may appear directly in a
-value position: `(blueprint (resource 'guix_blueprint 'pi3 ...))`. This is
+value position: `(blueprint (resource guix_blueprint pi3 ...))`. This is
 *not* a syntax error as it would be in HCL, because Scheme resources are
 values: the inner constructor is the tuple's value expression, evaluated
 eagerly when the outer resource is defined, yielding a `<tofu-resource>`
@@ -371,7 +375,7 @@ Arrays are Scheme vectors inside `untf` (`#^(vector ...)`, empty `#()`,
 `#^(list->vector xs)`).  Because `untf` strings are data, a string element
 that should stay an interpolating template is nested as `(tf "...")`.
 Mixing literal text with values uses OpenTofu's `format`, e.g.
-`#%(base64encode (format "%s\n" #^(attribute key 'secret_key)))`.
+`#%(base64encode (format "%s\n" #^(attribute key secret_key)))`.
 
 Reader shortcuts, registered when `(tofuix)` loads (infra files can use them
 after their `use-modules` form): `#%(...)` for `tf`, `#^x` for `untf`, and
@@ -379,7 +383,7 @@ after their `use-modules` form): `#%(...)` for `tf`, `#^x` for `untf`, and
 tofuix uses different characters and both can be used in one process (an
 infrastructure file next to gexp builder modules).  `tf` returns a reference
 that serializes as an interpolation, e.g.
-`#%(jsonencode #^(obj 'name "x"))` → `"${jsonencode({ \"name\" = \"x\" })}"`.
+`#%(jsonencode #^(obj name "x"))` → `"${jsonencode({ \"name\" = \"x\" })}"`.
 
 `untf` lowers Scheme *data*, not Guix objects: file-like objects and
 packages stay outside `tf` and are lowered later by the M3 lowering pass.
@@ -394,11 +398,11 @@ Some provider attributes are Scheme source that tofuix must not evaluate
 file and fill in the tofu-computed pieces with `{{name}}` placeholders:
 
 ```scheme
-(resource 'guix_blueprint 'pi3
+(resource guix_blueprint pi3
   (secrets
    (template-file "secrets.tmpl.scm"
-                  `(("age-secret"  . ,#%(base64encode (format "%s\n" #^(attribute age-key 'secret_key))))
-                    ("host-secret" . ,#%(base64encode (format "%s\n" #^(attribute host-key 'private_key_openssh))))))))
+                  `(("age-secret"  . ,#%(base64encode (format "%s\n" #^(attribute age-key secret_key))))
+                    ("host-secret" . ,#%(base64encode (format "%s\n" #^(attribute host-key private_key_openssh))))))))
 ```
 
 and `secrets.tmpl.scm`:
@@ -652,7 +656,8 @@ Execution model:
 - Tests run under Guix, as in `spartan-guix`: the Makefile invokes
   `guix repl -L modules -L .` for each suite, so Guix modules are always
   available and no separate test environment is needed.
-- Unit tests (SRFI-64, `tests/`): records construction and merge rules;
+- Unit tests (SRFI-64, `tests/`): records construction (raw identifiers,
+  quoted-form rejection) and merge rules;
   expression serialization; serializer output fixtures (golden JSON);
   evaluation and session capture, provenance resolution (imported and local
   bindings, aliases, circular and uncaptured errors), Scheme-source
@@ -674,7 +679,7 @@ Execution model:
 
 | Milestone | Deliverable | Acceptance |
 |---|---|---|
-| **M1** — DSL + serializer | `(tofuix records|expressions|serializer)` with constructor macros, unit tests, example config | Example Scheme serializes to byte-exact expected JSON; constructor macros expand to the same `tofu-`-prefixed records as the programmatic API; `attribute` chains and `ref` escapes serialize correctly; duplicate resources error |
+| **M1** — DSL + serializer | `(tofuix records|expressions|serializer)` with constructor macros, unit tests, example config | Example Scheme serializes to byte-exact expected JSON; constructor macros expand to the same `tofu-`-prefixed records as the programmatic API and take raw, unquoted identifiers; `attribute` chains and `ref` escapes serialize correctly; duplicate resources error |
 | **M2** — Extension + lifecycle | `guix tofu` entry point, working dir, `generate`/`validate`/`plan`/`apply`/`output`, lock preservation | `tls` example plans and applies through `guix tofu`; lock file survives regeneration; `--tool=terraform` works |
 | **M3** — Guix-value lowering | `lower.scm`, `build` command, package definitions | File-like/package/image arguments plan without realizing; apply builds and embeds exact paths; tool resolution PATH→package fallback works |
 | **M4** — Staged orchestration (v2) | stages, deferred outputs, checkpoints, resumable apply | Transcript use case: tofu-generated SSH key → Guix image → tofu host, resumable across an injected failure |

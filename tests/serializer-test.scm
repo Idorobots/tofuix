@@ -38,41 +38,41 @@
 (test-equal "locals with scalar values"
   '(("count" . 3) ("flag" . #t) ("name" . "x") ("ratio" . 2.5))
   (section (configuration
-            (local 'count 3)
-            (local 'flag #t)
-            (local 'name "x")
-            (local 'ratio 2.5))
+            (local count 3)
+            (local flag #t)
+            (local name "x")
+            (local ratio 2.5))
            "locals"))
 
 (test-equal "symbol values become strings"
   '(("algorithm" . "ED25519"))
   (resource-arguments
-   (configuration (resource 'tls_private_key 'deploy (algorithm 'ED25519)))
+   (configuration (resource tls_private_key deploy (algorithm 'ED25519)))
    "tls_private_key" "deploy"))
 
 (test-equal "resource section nests type and name"
   '(("tls_private_key"
      ("deploy" ("algorithm" . "ED25519"))))
   (section (configuration
-            (resource 'tls_private_key 'deploy (algorithm "ED25519")))
+            (resource tls_private_key deploy (algorithm "ED25519")))
            "resource"))
 
 (test-equal "arrays keep their order"
   '(("ids" . #(1 2)) ("tags" . #("a" "b")))
   (resource-arguments
-   (configuration (resource 'x 'y (tags "a" "b") (ids (vector 1 2))))
+   (configuration (resource x y (tags "a" "b") (ids (vector 1 2))))
    "x" "y"))
 
 (test-equal "empty vectors become empty arrays"
   '(("empty" . #()))
   (resource-arguments
-   (configuration (resource 'x 'y (empty (vector))))
+   (configuration (resource x y (empty (vector))))
    "x" "y"))
 
 (test-equal "empty lists become empty objects"
   '(("empty" . ()))
   (resource-arguments
-   (configuration (resource 'x 'y (empty (list))))
+   (configuration (resource x y (empty (list))))
    "x" "y"))
 
 (test-equal "a resource with no arguments serializes as an empty object"
@@ -84,7 +84,7 @@
   }
 }"
   (tofu-configuration->json
-   (configuration (resource 'age_secret_key 'pi3))))
+   (configuration (resource age_secret_key pi3))))
 
 (test-equal "tf expressions serialize as interpolations"
   "{
@@ -93,47 +93,47 @@
   }
 }"
   (tofu-configuration->json
-   (configuration (local 'x (tf (merge (untf '((a . "b")))))))))
+   (configuration (local x (tf (merge (untf '((a . "b")))))))))
 
 (test-error "non-association lists are an error"
   'misc-error
   (tofu-configuration->json
-   (configuration (resource 'x 'y (values (list "a" "b"))))))
+   (configuration (resource x y (values (list "a" "b"))))))
 
 (test-equal "arrays of objects become vectors of association lists"
   '(("ingress" . #((("from_port" . 80)) (("to_port" . 80)))))
   (resource-arguments
    (configuration
-    (resource 'aws_security_group 'web
-      (ingress (vector (obj 'from_port 80) (obj 'to_port 80)))))
+    (resource aws_security_group web
+      (ingress (vector (obj from_port 80) (obj to_port 80)))))
    "aws_security_group" "web"))
 
 (test-equal "objects nest through obj"
   '(("create" ("content" ("url" . "/gnu/store/example"))))
   (resource-arguments
    (configuration
-    (resource 'x 'y
-      (create (obj 'content (obj 'url "/gnu/store/example")))))
+    (resource x y
+      (create (obj content (obj url "/gnu/store/example")))))
    "x" "y"))
 
 (test-equal "quoted association lists nest as objects"
   '(("create" ("content" ("url" . "/gnu/store/example"))))
   (resource-arguments
    (configuration
-    (resource 'x 'y
+    (resource x y
       (create '((content . ((url . "/gnu/store/example")))))))
    "x" "y"))
 
 (test-equal "data source section"
   '(("aws_ami" ("server" ("most_recent" . #t))))
   (section (configuration
-            (data 'aws_ami 'server (most_recent #t)))
+            (data aws_ami server (most_recent #t)))
            "data"))
 
 (test-equal "variable section"
   '(("region" ("default" . "eu-central-1") ("type" . "string")))
   (section (configuration
-            (variable 'region
+            (variable region
               (type "string")
               (default "eu-central-1")))
            "variable"))
@@ -143,9 +143,9 @@
                   ("sensitive" . #t)
                   ("value" . "${var.region}")))
   (section (configuration
-            (variable 'region)
-            (output 'public-key
-              (attribute (variable 'region))
+            (variable region)
+            (output public-key
+              (attribute (variable region))
               (description "SSH key")
               (sensitive #t)))
            "output"))
@@ -153,8 +153,8 @@
 (test-equal "provider section only includes configured providers"
   '(("aws" ("region" . "eu-central-1")))
   (section (configuration
-            (provider 'tls "hashicorp/tls" "~> 4.0")
-            (provider 'aws "hashicorp/aws" "~> 6.0"
+            (provider tls "hashicorp/tls" "~> 4.0")
+            (provider aws "hashicorp/aws" "~> 6.0"
                       (region "eu-central-1")))
            "provider"))
 
@@ -163,8 +163,8 @@
      ("aws" ("source" . "hashicorp/aws") ("version" . "~> 6.0"))
      ("tls" ("source" . "hashicorp/tls"))))
   (section (configuration
-            (provider 'tls "hashicorp/tls")
-            (provider 'aws "hashicorp/aws" "~> 6.0"))
+            (provider tls "hashicorp/tls")
+            (provider aws "hashicorp/aws" "~> 6.0"))
            "terraform"))
 
 (test-equal "terraform root block and backend"
@@ -172,60 +172,60 @@
     ("required_version" . ">= 1.6"))
   (section (configuration
             (terraform (required_version ">= 1.6"))
-            (backend (local (obj 'path "state.json"))))
+            (backend (local (obj path "state.json"))))
            "terraform"))
 
 (test-equal "whole-resource references"
   '(("guix_blueprint" ("pi3" ("os" . "example")))
     ("guix_host" ("pi3" ("blueprint" . "${guix_blueprint.pi3}"))))
-  (let ((blueprint (resource 'guix_blueprint 'pi3 (os "example"))))
+  (let ((blueprint (resource guix_blueprint pi3 (os "example"))))
     (section (configuration
               blueprint
-              (resource 'guix_host 'pi3 (blueprint blueprint)))
+              (resource guix_host pi3 (blueprint blueprint)))
              "resource")))
 
 (test-equal "whole-variable and whole-local references"
   '(("local" . "${local.name}") ("variable" . "${var.region}"))
   (resource-arguments
    (configuration
-    (variable 'region)
-    (local 'name "n")
-    (resource 'x 'y
-      (variable (variable 'region))
-      (local (local 'name "n"))))
+    (variable region)
+    (local name "n")
+    (resource x y
+      (variable (variable region))
+      (local (local name "n"))))
    "x" "y"))
 
 (test-equal "referencing a variable by identity"
   '(("region" . "${var.region}"))
   (resource-arguments
    (configuration
-    (variable 'region)
-    (resource 'x 'y (region (attribute (variable 'region)))))
+    (variable region)
+    (resource x y (region (attribute (variable region)))))
    "x" "y"))
 
 (test-error "dangling resource reference" #t
   (serialize
    (configuration
-    (resource 'guix_host 'pi3
-      (blueprint (resource 'guix_blueprint 'pi3))))))
+    (resource guix_host pi3
+      (blueprint (resource guix_blueprint pi3))))))
 
 (test-error "dangling data source reference" #t
   (serialize
    (configuration
-    (resource 'x 'y (ami (data 'aws_ami 'server))))))
+    (resource x y (ami (data aws_ami server))))))
 
 (test-error "dangling variable reference" #t
   (serialize
    (configuration
-    (resource 'x 'y (region (variable 'region))))))
+    (resource x y (region (variable region))))))
 
 (test-error "dangling local reference" #t
   (serialize
    (configuration
-    (resource 'x 'y (name (local 'name "x"))))))
+    (resource x y (name (local name "x"))))))
 
 (test-error "unserializable values" #t
-  (serialize (configuration (local 'x (lambda () #t)))))
+  (serialize (configuration (local x (lambda () #t)))))
 
 (test-equal "array of objects keeps array structure"
   "{
@@ -246,9 +246,9 @@
 }"
   (tofu-configuration->json
    (configuration
-    (resource 'aws_security_group 'web
-      (ingress (vector (obj 'from_port 80)
-                       (obj 'to_port 80)))))))
+    (resource aws_security_group web
+      (ingress (vector (obj from_port 80)
+                       (obj to_port 80)))))))
 
 (test-equal "strings are escaped"
   "{
@@ -257,7 +257,7 @@
   }
 }"
   (tofu-configuration->json
-   (configuration (local 's "a\"b\nc\td"))))
+   (configuration (local s "a\"b\nc\td"))))
 
 (test-equal "control characters are escaped"
   "{
@@ -266,7 +266,7 @@
   }
 }"
   (tofu-configuration->json
-   (configuration (local 's (string #\a (integer->char 1))))))
+   (configuration (local s (string #\a (integer->char 1))))))
 
 (test-end "serializer")
 

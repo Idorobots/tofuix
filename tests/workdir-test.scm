@@ -31,7 +31,7 @@
 
 (define example
   (configuration
-   (resource 'terraform_data 'example
+   (resource terraform_data example
      (input "hello"))))
 
 (test-begin "workdir")

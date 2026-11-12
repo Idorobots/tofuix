@@ -9,16 +9,16 @@ Scheme, generate the JSON configuration, and run the selected tool.
 (use-modules (tofuix))
 
 (define deploy-key
-  (resource 'tls_private_key 'deploy
+  (resource tls_private_key deploy
     (algorithm "ED25519")))
 
 (define public-key
-  (output 'public-key
-    (attribute deploy-key 'public_key_openssh)))
+  (output public-key
+    (attribute deploy-key public_key_openssh)))
 
 (define infrastructure
   (configuration
-    (provider 'tls "hashicorp/tls" "~> 4.0")
+    (provider tls "hashicorp/tls" "~> 4.0")
     deploy-key
     public-key))
 ```
@@ -51,19 +51,21 @@ Scheme, generate the JSON configuration, and run the selected tool.
 ```
 
 Resources are first-class Scheme values, so references stay in Scheme:
-`(attribute resource 'name)` yields an unevaluated OpenTofu expression, and a
+`(attribute resource name)` yields an unevaluated OpenTofu expression, and a
 resource used directly as an argument value becomes a whole-object
-reference. Nested blocks use `(obj 'key value ...)` or plain association
+reference. Nested blocks use `(obj key value ...)` or plain association
 lists (objects); vectors are arrays, so `()` is `{}` and `#()` is `[]`.
 Guix values (file-like objects, packages) are lowered to store paths.
+Types, names, obj keys, and attribute steps are raw identifiers written
+without quotes: `(resource tls_private_key deploy (algorithm "ED25519"))`.
 
 When a value needs Terraform functions or mixes Scheme data with
 Terraform-computed values, use the gexp-like expression layer and its
 reader shortcuts (`#%`, `#^`, `#^@` — `#~`/`#$` stay Guix's):
 
 ```scheme
-(resource 'terraform_data 'example
-  (input #%(jsonencode #^(obj 'name "x" 'tags (vector "a" "b"))))
+(resource terraform_data example
+  (input #%(jsonencode #^(obj name "x" tags (vector "a" "b")))))
   (triggers_replace (computed-file "artifact" #~(begin (mkdir #$output)))))
 ```
 
@@ -74,7 +76,7 @@ at evaluation time:
 ```scheme
 (secrets
  (template-file "secrets.tmpl.scm"
-                `(("age-secret" . ,#%(base64encode (format "%s\n" #^(attribute age-key 'secret_key)))))))
+                `(("age-secret" . ,#%(base64encode (format "%s\n" #^(attribute age-key secret_key)))))))
 ```
 
 ## Running
@@ -106,7 +108,7 @@ for `generate`/`plan`/`validate`, realized ones for `build`/`apply`:
 (use-modules (tofuix) (guix gexp))
 
 (configuration
-  (resource 'terraform_data 'artifact
+  (resource terraform_data artifact
     (input (plain-file "greeting.txt" "hello from tofuix"))))
 ```
 
@@ -122,7 +124,7 @@ provider can re-evaluate them in its own environment:
 (use-modules (tofuix) (hosts rpi3))
 
 (configuration
-  (resource 'guix_blueprint 'pi3
+  (resource guix_blueprint pi3
     (os rpi3-os)))                  ; -> "(@ (hosts rpi3) rpi3-os)"
 ```
 

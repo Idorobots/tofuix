@@ -9,3 +9,15 @@ Let's combine the `eval` and `check` subcommands into a single `verify` subcomma
 - Verify if needed
 * Destroy subcommand
 * DONE Template file support
+* Unquoted identifiers in tofuix data
+Tofuix expressions such as `resource`, `data`, `output`, `variable`, etc should accept raw, unquoted identifiers for types and identifiers. For example:
+```
+(data external rekey
+  ...)
+```
+* Guix-inherited load path
+It would be nice if the load path for Tofuix calls would be inherited from Guix:
+- automatically add all channels to the loadpath so that individual `-L channel-name` is not needed,
+- automatically add the subdirectory where the `infrastructure.scm` file lives (including the subdirectory then the file is named explicitly with `--file`).
+* Better READEM and docs
+* Port infra/ to Tofuix

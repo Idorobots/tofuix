@@ -82,7 +82,7 @@
 
 (define my-alias shared-object)
 
-(configuration (resource 'terraform_data 'demo (input \"x\")))
+(configuration (resource terraform_data demo (input \"x\")))
 ")))
   (test-equal "local aliases resolve to the imported binding"
     "(@ (tests fixtures provenance-a) shared-object)"
@@ -93,7 +93,7 @@
 
 (define local-thing (list 'x 1 \"two\"))
 
-(configuration (resource 'terraform_data 'demo (input \"x\")))
+(configuration (resource terraform_data demo (input \"x\")))
 ")))
   (let ((rendered
          (resolve-named-value (session-module-value session 'local-thing)
@@ -110,7 +110,7 @@
 (define base (list 'b))
 (define combo (list 'inner base))
 
-(configuration (resource 'terraform_data 'demo (input \"x\")))
+(configuration (resource terraform_data demo (input \"x\")))
 ")))
   (test-equal "local references inside a local form are substituted"
     '(list 'inner (list 'b))
@@ -122,7 +122,7 @@
 
 (define wrapper (list 'wrap shared-object))
 
-(configuration (resource 'terraform_data 'demo (input \"x\")))
+(configuration (resource terraform_data demo (input \"x\")))
 ")))
   (let ((rendered
          (resolve-named-value (session-module-value session 'wrapper)
@@ -138,7 +138,7 @@
 
 (define unrelated (list 'plain))
 
-(configuration (resource 'terraform_data 'demo (input \"x\")))
+(configuration (resource terraform_data demo (input \"x\")))
 ")))
   (test-equal "the preamble carries every direct import, used or not"
     '(use-modules (ice-9 format) (tests fixtures provenance-a))
@@ -152,7 +152,7 @@
 (define (f) (g))
 (define (g) (f))
 
-(configuration (resource 'terraform_data 'demo (input \"x\")))
+(configuration (resource terraform_data demo (input \"x\")))
 ")))
   (test-error "circular local references are an error"
     'tofuix-error
@@ -163,7 +163,7 @@
 
 (define-values (a b) (values 1 2))
 
-(configuration (resource 'terraform_data 'demo (input \"x\")))
+(configuration (resource terraform_data demo (input \"x\")))
 ")))
   (test-error "uncaptured local bindings are an error"
     'tofuix-error

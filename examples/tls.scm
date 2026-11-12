@@ -11,15 +11,15 @@
   #:export (infrastructure))
 
 (define deploy-key
-  (resource 'tls_private_key 'deploy
+  (resource tls_private_key deploy
     (algorithm "ED25519")))
 
 (define public-key
-  (output 'public-key
-    (attribute deploy-key 'public_key_openssh)))
+  (output public-key
+    (attribute deploy-key public_key_openssh)))
 
 (define infrastructure
   (configuration
-    (provider 'tls "hashicorp/tls" "~> 4.0")
+    (provider tls "hashicorp/tls" "~> 4.0")
     deploy-key
     public-key))

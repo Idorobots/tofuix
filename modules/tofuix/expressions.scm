@@ -17,6 +17,7 @@
             tofu-ref-path
             tofu-ref->string
             attribute
+            tofu-attribute
             ref
             guile
             tf
@@ -47,17 +48,17 @@ dynamic or computed references."
 
 (define ref tofu-ref)
 
-(define (attribute object . steps)
+(define (tofu-attribute object . steps)
   "Return an attribute reference to OBJECT, optionally walking STEPS.
 OBJECT is a resource, data source, variable, local, or another reference.
 Each step is a symbol or string (an attribute name) or an integer (an
 index):
 
-  (attribute deploy-key 'public_key_openssh)
+  (attribute deploy-key public_key_openssh)
   => ${tls_private_key.deploy.public_key_openssh}
 
-  (attribute (attribute server 'network_interface) 'address)
-  (attribute server 'addresses 0)  => ${...addresses}[0]"
+  (attribute (attribute server network_interface) address)
+  (attribute server addresses 0)  => ${...addresses}[0]"
   (make-tofu-ref
    (let loop ((path (reference-base object)) (steps steps))
      (match steps
@@ -76,6 +77,17 @@ index):
                                               "tofuix: invalid attribute step: ~s"
                                               step)))))
               rest))))))
+
+(define-syntax attribute
+  (lambda (form)
+    (define (literalize step)
+      (if (symbol? (syntax->datum step))
+          #`(quote #,step)
+          step))
+    (syntax-case form ()
+      ((_ object step ...)
+       #`(tofu-attribute object
+           #,@(map literalize (syntax-list #'(step ...))))))))
 
 (define (reference-base object)
   (cond

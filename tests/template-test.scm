@@ -14,8 +14,8 @@
 (define runner (test-runner-create))
 (test-runner-current runner)
 
-(define age-key (resource 'age_secret_key 'pi3))
-(define host-key (resource 'tls_private_key 'pi3_host))
+(define age-key (resource age_secret_key pi3))
+(define host-key (resource tls_private_key pi3_host))
 
 (define (make-temp-directory)
   (mkdtemp "/tmp/tofuix-template-XXXXXX"))
@@ -41,7 +41,7 @@
 (test-equal "references render as interpolations"
   "(content (base64-decode \"${age_secret_key.pi3.secret_key}\"))"
   (render-template "(content (base64-decode \"{{key}}\"))"
-                   `(("key" . ,(attribute age-key 'secret_key)))))
+                   `(("key" . ,(attribute age-key secret_key)))))
 
 (test-equal "records render as whole-object interpolations"
   "${tls_private_key.pi3_host}"
@@ -103,8 +103,8 @@
         (content (base64-decode \"${tls_private_key.pi3_host.private_key_openssh}\"))))))
 "
     (template-file file
-                   `(("age-secret" . ,(attribute age-key 'secret_key))
-                     ("host-secret" . ,(attribute host-key 'private_key_openssh)))))
+                   `(("age-secret" . ,(attribute age-key secret_key))
+                     ("host-secret" . ,(attribute host-key private_key_openssh)))))
   (test-error "a missing template file is an error" #t
     (template-file (in-vicinity directory "absent.tmpl.scm") '()))
   (system* "rm" "-rf" directory))

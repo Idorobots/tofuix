@@ -184,6 +184,10 @@ an association list such as `(description sensitive depends_on)'."
   "Return KEY (a symbol or a string) as a string."
   (cond ((string? key) key)
         ((symbol? key) (symbol->string key))
+        ((and (pair? key) (eq? (car key) 'quote))
+         (error (format #f
+                        "tofuix: invalid name or key: ~s; identifiers in constructor macros are written raw, without a quote"
+                        key)))
         (else (error (format #f "tofuix: invalid name or key: ~s" key)))))
 
 (define (arguments->alist arguments who)
@@ -209,9 +213,9 @@ an error."
            (error (format #f "tofuix: duplicate ~a argument: ~a" who key)))
          (loop more (cons (cons key value) seen)))))))
 
-(define (obj . key-values)
+(define (%obj . key-values)
   "Build an association list from alternating keys and values, for nested
-blocks: (obj 'content (obj 'url \"/gnu/store/...\"))."
+blocks: (obj content (obj url \"/gnu/store/...\"))."
   (let loop ((rest key-values) (result '()))
     (match rest
       (() (reverse result))
@@ -307,6 +311,13 @@ into a single configuration, rejecting duplicate identities."
 ;;;
 ;;; Constructor macros: the ergonomic layer.
 ;;;
+;;; Identifier positions---resource and data types and names, variable,
+;;; output, local and provider names, and obj keys---are raw identifiers,
+;;; read verbatim at macro expansion and never evaluated:
+;;;
+;;;   (resource tls_private_key deploy (algorithm "ED25519"))
+;;;   (obj content (obj url "/gnu/store/..."))
+;;;
 
 (define-syntax %tofu-arg-value
   (syntax-rules ()
@@ -316,31 +327,31 @@ into a single configuration, rejecting duplicate identities."
 (define-syntax resource
   (syntax-rules ()
     ((_ type name (key value ...) ...)
-     (tofu-resource type name
+     (tofu-resource 'type 'name
        #:arguments (list (cons 'key (%tofu-arg-value value ...)) ...)))))
 
 (define-syntax data
   (syntax-rules ()
     ((_ type name (key value ...) ...)
-     (tofu-data type name
+     (tofu-data 'type 'name
        #:arguments (list (cons 'key (%tofu-arg-value value ...)) ...)))))
 
 (define-syntax variable
   (syntax-rules ()
     ((_ name (key value ...) ...)
-     (tofu-variable name
+     (tofu-variable 'name
        (list (cons 'key (%tofu-arg-value value ...)) ...)))))
 
 (define-syntax output
   (syntax-rules ()
     ((_ name value (key v ...) ...)
-     (tofu-output name value
+     (tofu-output 'name value
        (list (cons 'key (%tofu-arg-value v ...)) ...)))))
 
 (define-syntax local
   (syntax-rules ()
     ((_ name value)
-     (tofu-local name value))))
+     (tofu-local 'name value))))
 
 (define-syntax provider
   (lambda (form)
@@ -351,15 +362,28 @@ into a single configuration, rejecting duplicate identities."
          #'(list (cons 'key (%tofu-arg-value value ...)) ...))))
     (syntax-case form ()
       ((_ name source)
-       #'(tofu-provider name source))
+       #'(tofu-provider 'name source))
       ((_ name source extra rest ...)
        (string? (syntax->datum #'extra))
-       #`(tofu-provider name source
+       #`(tofu-provider 'name source
            #:version extra
            #:arguments #,(tuples->alist #'(rest ...))))
       ((_ name source rest ...)
-       #`(tofu-provider name source
+       #`(tofu-provider 'name source
            #:arguments #,(tuples->alist #'(rest ...)))))))
+
+(define-syntax obj
+  (lambda (form)
+    (define (expand stx)
+      (syntax-case stx ()
+        (() #'())
+        ((key value rest ...)
+         #`('key value . #,(expand #'(rest ...))))
+        ((key)
+         #'((error "tofuix: obj expects an even number of arguments")))))
+    (syntax-case form ()
+      ((_ rest ...)
+       #`(%obj . #,(expand #'(rest ...)))))))
 
 (define-syntax configuration
   (syntax-rules ()

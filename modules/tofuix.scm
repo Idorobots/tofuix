@@ -67,7 +67,7 @@
                tofu-ref?
                tofu-ref-path
                tofu-ref->string
-               attribute ref guile
+                attribute tofu-attribute ref guile
                tf untf untf-splicing
                render-template template-file
 

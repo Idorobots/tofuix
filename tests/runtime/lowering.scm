@@ -58,7 +58,7 @@
 
 (define configuration-with-artifact
   (configuration
-    (resource 'terraform_data 'artifact
+    (resource terraform_data artifact
       (input unique-artifact))))
 
 (let ((path (resource-input (lower-configuration configuration-with-artifact store))))
@@ -89,14 +89,14 @@
 
 ;;; References and expressions are values, not containers.
 (define example
-  (resource 'terraform_data 'example
+  (resource terraform_data example
     (input "value")))
 
 (define reference-configuration
   (configuration
     example
-    (local 'the-resource example)
-    (output 'identifier (attribute example 'id))))
+    (local the-resource example)
+    (output identifier (attribute example id))))
 
 (let ((json (tofu-configuration->json
              (lower-configuration reference-configuration store))))
@@ -113,7 +113,7 @@
 (let ((lowered
        (lower-configuration
         (configuration
-          (resource 'guix_blueprint 'demo (os demo-os)))
+          (resource guix_blueprint demo (os demo-os)))
         store #:session os-session)))
   (check "imported operating systems lower to their module reference"
          (string=? (resource-argument "os" lowered)
@@ -136,7 +136,7 @@
 
 (define infrastructure
   (configuration
-    (resource 'guix_blueprint 'local (os my-os))))
+    (resource guix_blueprint local (os my-os))))
 " port)))
   (let-values (((configuration session) (tofu-evaluate-file file)))
     (let ((lowered (lower-configuration configuration store
