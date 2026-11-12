@@ -584,6 +584,7 @@ load are shipped through the blueprint's `source_files`.
 | `guix tofu validate -f infra.scm` | `tofu init -backend=false` + `tofu validate` |
 | `guix tofu plan -f infra.scm` | Dry-run semantics; generate, realize nothing, `tofu plan` |
 | `guix tofu apply -f infra.scm` | Realize artifacts, then `tofu apply` |
+| `guix tofu destroy -f infra.scm` | Generate, init, then `tofu destroy` (teardown; realizes nothing) |
 | `guix tofu output [-f infra.scm] [NAME]` | Read outputs (`tofu output -json` / `-raw`) |
 | `guix tofu graph -f infra.scm` | Print the resource/stage dependency graph (later milestone) |
 

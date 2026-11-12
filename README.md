@@ -98,7 +98,8 @@ file's directory and the current directory are searched automatically
 (`-L` adds entries ahead of those).  The provider lock file, state, and
 provider cache stay untouched across regenerations.  Commands: `generate`,
 `build` (also realizes required Guix artifacts), `validate` (`tofu init
--backend=false` and `tofu validate`), `plan`, `apply`, and `output`; unknown
+-backend=false` and `tofu validate`), `plan`, `apply`, `destroy`
+(generate, init, then `tofu destroy` — realizes nothing), and `output`; unknown
 options and arguments after `--` are forwarded to the tool.  Once tofuix is
 installed as a channel, plain `guix tofu` works without the environment
 variable.

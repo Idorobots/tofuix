@@ -42,6 +42,8 @@ Commands:
   plan      Generate the configuration, initialize providers, then run
             `tofu plan'
   apply     As plan, then run `tofu apply'
+  destroy   Generate the configuration, initialize providers, then run
+            `tofu destroy'
   output    Print OpenTofu outputs (from the existing state unless -f is
             given); prints `tofu output -json' unless an output name is given
   help      Show this help
@@ -297,6 +299,19 @@ building the package when needed."
                       (append (list "apply") forwarded)
                       workdir))))
 
+(define (command-destroy file chdir load-path positionals forwarded tool)
+  (no-positionals "destroy" positionals)
+  (let-values (((configuration root session)
+                (load-configuration file chdir load-path)))
+    (let* ((lowered (lower-infrastructure configuration session))
+           (workdir (tofu-workdir root))
+           (program (resolve-tool tool)))
+      (tofu-write-configuration lowered workdir)
+      (run-after-init program
+                      (list "init" "-input=false")
+                      (append (list "destroy") forwarded)
+                      workdir))))
+
 (define (command-output file chdir load-path positionals forwarded tool)
   (when (> (length positionals) 1)
     (throw 'tofuix-error "output takes at most one output name"))
@@ -335,8 +350,10 @@ building the package when needed."
         (command-validate file chdir load-path positionals forwarded tool))
        ((string=? command "plan")
         (command-plan file chdir load-path positionals forwarded tool))
-       ((string=? command "apply")
-        (command-apply file chdir load-path positionals forwarded tool))
+        ((string=? command "apply")
+         (command-apply file chdir load-path positionals forwarded tool))
+        ((string=? command "destroy")
+         (command-destroy file chdir load-path positionals forwarded tool))
        ((string=? command "output")
         (command-output file chdir load-path positionals forwarded tool))
        ((string=? command "graph")

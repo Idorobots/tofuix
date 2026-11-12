@@ -56,6 +56,14 @@
   (test-equal "nothing is positional" '() positionals))
 
 (let-values (((command options positionals forwarded)
+              (tofu-parse-arguments '("destroy" "-f" "x.scm" "--" "-target=terraform_data.example"))))
+  (test-equal "destroy is parsed as the command" "destroy" command)
+  (test-equal "destroy sets the file" "x.scm" (option options 'file))
+  (test-equal "destroy forwards tool arguments"
+    '("-target=terraform_data.example") forwarded)
+  (test-equal "destroy takes no positionals" '() positionals))
+
+(let-values (((command options positionals forwarded)
               (tofu-parse-arguments '("output" "public-key"))))
   (test-equal "output names are positional" '("public-key") positionals)
   (test-equal "the command is parsed" "output" command))
