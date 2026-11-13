@@ -102,31 +102,66 @@
   (set! output
         (with-output-to-string
           (lambda ()
-            (set! status (tofu-main '("generate" "-f" "examples/tls.scm"))))))
-  (test-equal "generate succeeds" 0 status)
-  (test-equal "generate prints the configuration followed by a newline"
+            (set! status (tofu-main '("inspect" "-f" "examples/tls.scm"))))))
+  (test-equal "inspect succeeds" 0 status)
+  (test-equal "inspect prints the configuration followed by a newline"
     (string-append golden "\n")
     output))
 
-(let* ((directory (make-temp-directory))
-       (file (in-vicinity directory "infrastructure.scm"))
-       (status #f)
-       (output #f))
-  (write-file file "\
+(define (call-with-tool-shim thunk)
+  "Run THUNK with a fake `tofu' on PATH that appends its arguments to the
+file named by $TOFUIX_TEST_LOG.  THUNK receives the log file name."
+  (let* ((directory (make-temp-directory))
+         (shim (in-vicinity directory "tofu"))
+         (log (in-vicinity directory "calls.log"))
+         (saved-path (getenv "PATH")))
+    (write-file shim "\
+#!/bin/sh
+echo \"$*\" >> \"$TOFUIX_TEST_LOG\"
+")
+    (system* "chmod" "+x" shim)
+    (setenv "PATH" (string-append directory ":" saved-path))
+    (setenv "TOFUIX_TEST_LOG" log)
+    (dynamic-wind
+      (const #t)
+      (lambda () (thunk log))
+      (lambda ()
+        (setenv "PATH" saved-path)
+        (system* "rm" "-rf" directory)))))
+
+(define (write-test-infrastructure directory)
+  (let ((file (in-vicinity directory "infrastructure.scm")))
+    (write-file file "\
 (use-modules (tofuix))
 
 (configuration (resource terraform_data example (input \"built\")))
 ")
-  (set! output
-        (with-output-to-string
-          (lambda ()
-            (set! status (tofu-main (list "build" "-C" directory))))))
-  (test-equal "build succeeds without lowerable values" 0 status)
-  (test-equal "build writes the configuration to the working directory"
-    (string-append output "")
-    (call-with-input-file (in-vicinity directory ".tofuix/main.tf.json")
-      get-string-all))
-  (system* "rm" "-rf" directory))
+    file))
+
+(call-with-tool-shim
+ (lambda (log)
+   (let ((directory (make-temp-directory)))
+     (write-test-infrastructure directory)
+     (test-equal "init succeeds" 0
+       (tofu-main (list "init" "-C" directory)))
+     (test-equal "init runs `tofu init'"
+       "init\n"
+       (call-with-input-file log get-string-all))
+     (test-equal "init writes the configuration to the working directory"
+       #t
+       (file-exists? (in-vicinity directory ".tofuix/main.tf.json")))
+     (system* "rm" "-rf" directory))))
+
+(call-with-tool-shim
+ (lambda (log)
+   (let ((directory (make-temp-directory)))
+     (write-test-infrastructure directory)
+     (test-equal "plan succeeds" 0
+       (tofu-main (list "plan" "-C" directory)))
+     (test-equal "plan runs only `tofu plan', without an implicit init"
+       "plan\n"
+       (call-with-input-file log get-string-all))
+     (system* "rm" "-rf" directory))))
 
 (test-end "cli")
 

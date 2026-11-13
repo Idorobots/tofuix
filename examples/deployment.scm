@@ -6,7 +6,8 @@
 
 ;;; A small deployment: an Ed25519 key, a Guix-built artifact, and a
 ;;; package — Guix values are ordinary argument values, lowered to store
-;;; paths (prospective for `generate'/`plan', realized for `build'/`apply').
+;;; paths (prospective for `inspect'/`init'/`validate'/`destroy', realized for
+;;; `plan'/`apply').
 
 (define-module (examples deployment)
   #:use-module (gnu packages)

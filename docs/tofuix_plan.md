@@ -5,8 +5,8 @@
 **Command:** `guix tofu`, delivered as a Guix channel extension.
 **Status:** M1–M3 implemented — Scheme DSL, JSON serializer, 195 SRFI-64
 unit tests plus store-dependent runtime checks, the `examples/tls.scm` golden
-example, the `guix tofu` extension (`generate`/`build`/`validate`/`plan`/
-`apply`/`output`, working-directory and lock management, `--tool` selection),
+example, the `guix tofu` extension (`inspect`/`init`/`validate`/`plan`/`apply`/
+`destroy`/`output`, working-directory and lock management, `--tool` selection),
 Guix-value lowering (file-like objects and packages to store paths; named
 Guix records such as operating systems and images to module references), the
 channel's pinned `opentofu` package with PATH → store tool fallback, the
@@ -46,7 +46,7 @@ Core properties:
 
 | Version | Contents |
 |---|---|
-| **v1** | Scheme DSL, JSON serializer, `guix tofu` extension, single-stage lifecycle (`generate`/`build`/`validate`/`plan`/`apply`/`output`), Guix-value lowering, provider lock management |
+| **v1** | Scheme DSL, JSON serializer, `guix tofu` extension, single-stage lifecycle (`inspect`/`init`/`validate`/`plan`/`apply`/`destroy`/`output`), Guix-value lowering, provider lock management |
 | **v2** | Staged bidirectional orchestration: tofu outputs feeding Guix builds feeding later tofu stages; deferred evaluation; resumable checkpoints |
 
 Explicit non-goals for v1:
@@ -465,9 +465,10 @@ always available.
 | Named Guix record (`<operating-system>`, `<image>`, `<machine>`, other exported records) | Resolve the binding's module provenance → canonical module-reference string (section 7.1) |
 | Anything else with no store form and no discoverable binding | Error listing the explicit remedies |
 
-For `plan`, derivations are constructed but **not realized**; the prospective
-store path is embedded in the JSON. For `apply`/`build`, the derivation is
-realized first and the exact artifact path is embedded. Changes in the
+For `plan` and `apply`, derivations are realized first and the exact artifact
+path is embedded. `inspect`, `init`, `validate`, and `destroy` construct
+derivations but **not realize** them, so the prospective store path is
+embedded. Changes in the
 underlying Guix definitions therefore propagate into new store paths, and
 OpenTofu plans the corresponding infrastructure change — without tofuix
 knowing anything about the provider consuming the path.
@@ -480,8 +481,8 @@ predicates are autoloaded. `lower-value` computes file-like objects with
 `lower-object` and packages with `package-derivation`; `lower-configuration`
 collects the derivations involved and, with `#:realize? #t`, builds them
 before returning
-— so `generate`/`validate`/`plan` leave artifacts prospective while
-`build`/`apply` realize them. The store connection is opened on first use.
+— so `inspect`/`init`/`validate`/`destroy` leave artifacts prospective while
+`plan`/`apply` realize them. The store connection is opened on first use.
 
 Two consequences worth knowing:
 
@@ -579,12 +580,12 @@ load are shipped through the blueprint's `source_files`.
 
 | Command | Purpose |
 |---|---|
-| `guix tofu generate -f infra.scm` | Evaluate and serialize; print/emit JSON; no builds |
-| `guix tofu build -f infra.scm` | As `generate`, plus realize required Guix artifacts |
-| `guix tofu validate -f infra.scm` | `tofu init -backend=false` + `tofu validate` |
-| `guix tofu plan -f infra.scm` | Dry-run semantics; generate, realize nothing, `tofu plan` |
-| `guix tofu apply -f infra.scm` | Realize artifacts, then `tofu apply` |
-| `guix tofu destroy -f infra.scm` | Generate, init, then `tofu destroy` (teardown; realizes nothing) |
+| `guix tofu inspect -f infra.scm` | Evaluate and serialize; print JSON; no tool, no builds |
+| `guix tofu init -f infra.scm` | Generate the configuration, then `tofu init` |
+| `guix tofu validate -f infra.scm` | Generate the configuration, then `tofu validate` |
+| `guix tofu plan -f infra.scm` | Generate, realize Guix artifacts, then `tofu plan` |
+| `guix tofu apply -f infra.scm` | Generate, realize artifacts, then `tofu apply` |
+| `guix tofu destroy -f infra.scm` | Generate, then `tofu destroy` (teardown; realizes nothing) |
 | `guix tofu output [-f infra.scm] [NAME]` | Read outputs (`tofu output -json` / `-raw`) |
 | `guix tofu graph -f infra.scm` | Print the resource/stage dependency graph (later milestone) |
 
@@ -691,8 +692,8 @@ Execution model:
 | Milestone | Deliverable | Acceptance |
 |---|---|---|
 | **M1** — DSL + serializer | `(tofuix records|expressions|serializer)` with constructor macros, unit tests, example config | Example Scheme serializes to byte-exact expected JSON; constructor macros expand to the same `tofu-`-prefixed records as the programmatic API and take raw, unquoted identifiers; `attribute` chains and `ref` escapes serialize correctly; duplicate resources error |
-| **M2** — Extension + lifecycle | `guix tofu` entry point, working dir, `generate`/`validate`/`plan`/`apply`/`output`, lock preservation | `tls` example plans and applies through `guix tofu`; lock file survives regeneration; `--tool=terraform` works |
-| **M3** — Guix-value lowering | `lower.scm`, `build` command, package definitions | File-like/package/image arguments plan without realizing; apply builds and embeds exact paths; tool resolution PATH→package fallback works |
+| **M2** — Extension + lifecycle | `guix tofu` entry point, working dir, `inspect`/`init`/`validate`/`plan`/`apply`/`destroy`/`output`, lock preservation | `tls` example plans and applies through `guix tofu`; lock file survives regeneration; `--tool=terraform` works |
+| **M3** — Guix-value lowering | `lower.scm`, artifact realization, package definitions | File-like/package/image arguments realize during `plan`/`apply` and embed exact paths; tool resolution PATH→package fallback works |
 | **M4** — Staged orchestration (v2) | stages, deferred outputs, checkpoints, resumable apply | Transcript use case: tofu-generated SSH key → Guix image → tofu host, resumable across an injected failure |
 
 ## 13. Settled design decisions

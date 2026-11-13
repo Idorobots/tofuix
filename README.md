@@ -39,8 +39,8 @@ From `examples/deployment.scm`:
       (attribute deploy-key public_key_openssh))))
 ```
 
-`guix tofu generate -f examples/deployment.scm` prints (store paths are
-prospective; `build` and `apply` realize them first):
+`guix tofu inspect -f examples/deployment.scm` prints (store paths are
+prospective; `plan` and `apply` realize them first):
 
 ```json
 {
@@ -112,7 +112,7 @@ Guix values are ordinary argument values; `guix tofu` lowers them before
 serialization:
 
 - file-like objects and packages lower to store paths — prospective for
-  `generate`/`plan`/`validate`, realized for `build`/`apply`;
+  `inspect`/`init`/`validate`/`destroy`, realized for `plan`/`apply`;
 - named Guix records — operating systems, images, machines, and other
   exported records — cross the boundary **by name**, so a provider can
   re-evaluate them in its own environment:
@@ -154,12 +154,12 @@ GUIX_EXTENSIONS_PATH=$PWD/modules guix tofu plan -f examples/deployment.scm
 
 | Command | Purpose |
 |---|---|
-| `generate` | Evaluate the infrastructure file and print its JSON configuration |
-| `build` | As `generate`, realize required Guix artifacts, and write the configuration |
-| `validate` | Generate, then `tofu init -backend=false` and `tofu validate` |
-| `plan` | Generate, initialize providers, then `tofu plan` |
-| `apply` | As `plan` with realization, then `tofu apply` |
-| `destroy` | Generate, initialize providers, then `tofu destroy` (realizes nothing) |
+| `inspect` | Generate the configuration and printas JSON |
+| `init` | Generate the configuration, then run `tofu init` |
+| `validate` | Generate the configuration, then run `tofu validate` |
+| `plan` | Generate the configuration, realize required Guix artifacts, then run `tofu plan` |
+| `apply` | Generate the configuration, realize required Guix artifacts, then run `tofu apply` |
+| `destroy` | Generate the configuration, then run `tofu destroy` |
 | `output` | Print outputs from existing state (`-json` unless a name is given) |
 
 Common options: `-f, --file=FILE` (default `infrastructure.scm`),
@@ -171,6 +171,10 @@ next to it, and runs `tofu` — or `terraform` with `--tool=terraform` — in
 that directory; when no `tofu` is on `PATH`, it builds the channel's pinned
 `opentofu` package instead. The provider lock file, state, and provider
 cache stay untouched across regenerations.
+
+Only `init` initializes providers: run `guix tofu init` once, and again after
+changing provider requirements. `validate`, `plan`, `apply`, and `destroy`
+expect providers to be installed already.
 
 Modules resolve without `-L` flags: the channels of the invoking `guix`
 are already on the load path, and the infrastructure file's directory and

@@ -34,16 +34,13 @@
 Usage: guix tofu COMMAND [OPTIONS] [-- ARGS...]
 
 Commands:
-  generate  Evaluate the infrastructure file and print its JSON configuration
-  build     As generate, realize required Guix artifacts, and write the
-            configuration to the working directory
-  validate  Generate the configuration, then run `tofu init -backend=false'
-            and `tofu validate'
-  plan      Generate the configuration, initialize providers, then run
-            `tofu plan'
+  inspect   Evaluate the infrastructure file and print its JSON configuration
+  init      Generate the configuration, then run `tofu init'
+  validate  Generate the configuration, then run `tofu validate'
+  plan      Generate the configuration, realize required Guix artifacts,
+            then run `tofu plan'
   apply     As plan, then run `tofu apply'
-  destroy   Generate the configuration, initialize providers, then run
-            `tofu destroy'
+  destroy   Generate the configuration, then run `tofu destroy'
   output    Print OpenTofu outputs (from the existing state unless -f is
             given); prints `tofu output -json' unless an output name is given
   help      Show this help
@@ -217,22 +214,17 @@ building the package when needed."
           (throw 'tofuix-error
                  "the terraform executable is not on PATH; tofuix does not package Terraform"))))
 
-(define (run-after-init program init-arguments arguments workdir)
-  (let ((status (tofu-run program init-arguments #:directory workdir)))
-    (if (zero? status)
-        (tofu-run program arguments #:directory workdir)
-        status)))
-
 (define (no-positionals command positionals)
   (unless (null? positionals)
     (throw 'tofuix-error
            (format #f "~a takes no positional arguments: ~s" command positionals))))
 
-(define (command-generate file chdir load-path positionals forwarded)
-  (no-positionals "generate" positionals)
+(define (command-inspect file chdir load-path positionals forwarded)
+  (no-positionals "inspect" positionals)
   (unless (null? forwarded)
     (throw 'tofuix-error
-           (format #f "generate does not run a tool; unexpected arguments: ~s" forwarded)))
+           (format #f "inspect does not run a tool; unexpected arguments: ~s"
+                   forwarded)))
   (let-values (((configuration root session)
                 (load-configuration file chdir load-path)))
     (display (tofu-configuration->json
@@ -240,20 +232,23 @@ building the package when needed."
     (newline)
     0))
 
-(define (command-build file chdir load-path positionals forwarded)
-  (no-positionals "build" positionals)
-  (unless (null? forwarded)
-    (throw 'tofuix-error
-           (format #f "build does not run a tool; unexpected arguments: ~s" forwarded)))
+(define (run-tool command file chdir load-path realize? tool forwarded)
+  "Generate the configuration, write it to the working directory, and run
+COMMAND with FORWARDED arguments on the resolved TOOL, realizing required
+Guix artifacts when REALIZE? is true."
   (let-values (((configuration root session)
                 (load-configuration file chdir load-path)))
     (let* ((lowered (lower-infrastructure configuration session
-                                           #:realize? #t))
-           (workdir (tofu-workdir root)))
+                                           #:realize? realize?))
+           (workdir (tofu-workdir root))
+           (program (resolve-tool tool)))
       (tofu-write-configuration lowered workdir)
-      (display (tofu-configuration->json lowered))
-      (newline)
-      0)))
+      (tofu-run program (append (list command) forwarded)
+                #:directory workdir))))
+
+(define (command-init file chdir load-path positionals forwarded tool)
+  (no-positionals "init" positionals)
+  (run-tool "init" file chdir load-path #f tool forwarded))
 
 (define (command-graph file chdir load-path positionals forwarded)
   (throw 'tofuix-error
@@ -261,56 +256,19 @@ building the package when needed."
 
 (define (command-validate file chdir load-path positionals forwarded tool)
   (no-positionals "validate" positionals)
-  (let-values (((configuration root session)
-                (load-configuration file chdir load-path)))
-    (let* ((lowered (lower-infrastructure configuration session))
-           (workdir (tofu-workdir root))
-           (program (resolve-tool tool)))
-      (tofu-write-configuration lowered workdir)
-      (run-after-init program
-                      (list "init" "-backend=false" "-input=false")
-                      (append (list "validate") forwarded)
-                      workdir))))
+  (run-tool "validate" file chdir load-path #f tool forwarded))
 
 (define (command-plan file chdir load-path positionals forwarded tool)
   (no-positionals "plan" positionals)
-  (let-values (((configuration root session)
-                (load-configuration file chdir load-path)))
-    (let* ((lowered (lower-infrastructure configuration session))
-           (workdir (tofu-workdir root))
-           (program (resolve-tool tool)))
-      (tofu-write-configuration lowered workdir)
-      (run-after-init program
-                      (list "init" "-input=false")
-                      (append (list "plan") forwarded)
-                      workdir))))
+  (run-tool "plan" file chdir load-path #t tool forwarded))
 
 (define (command-apply file chdir load-path positionals forwarded tool)
   (no-positionals "apply" positionals)
-  (let-values (((configuration root session)
-                (load-configuration file chdir load-path)))
-    (let* ((lowered (lower-infrastructure configuration session
-                                           #:realize? #t))
-           (workdir (tofu-workdir root))
-           (program (resolve-tool tool)))
-      (tofu-write-configuration lowered workdir)
-      (run-after-init program
-                      (list "init" "-input=false")
-                      (append (list "apply") forwarded)
-                      workdir))))
+  (run-tool "apply" file chdir load-path #t tool forwarded))
 
 (define (command-destroy file chdir load-path positionals forwarded tool)
   (no-positionals "destroy" positionals)
-  (let-values (((configuration root session)
-                (load-configuration file chdir load-path)))
-    (let* ((lowered (lower-infrastructure configuration session))
-           (workdir (tofu-workdir root))
-           (program (resolve-tool tool)))
-      (tofu-write-configuration lowered workdir)
-      (run-after-init program
-                      (list "init" "-input=false")
-                      (append (list "destroy") forwarded)
-                      workdir))))
+  (run-tool "destroy" file chdir load-path #f tool forwarded))
 
 (define (command-output file chdir load-path positionals forwarded tool)
   (when (> (length positionals) 1)
@@ -342,10 +300,10 @@ building the package when needed."
        ((or help (not command) (string=? command "help"))
         (tofu-usage (current-output-port))
         0)
-       ((string=? command "generate")
-        (command-generate file chdir load-path positionals forwarded))
-       ((string=? command "build")
-        (command-build file chdir load-path positionals forwarded))
+       ((string=? command "inspect")
+        (command-inspect file chdir load-path positionals forwarded))
+       ((string=? command "init")
+        (command-init file chdir load-path positionals forwarded tool))
        ((string=? command "validate")
         (command-validate file chdir load-path positionals forwarded tool))
        ((string=? command "plan")
