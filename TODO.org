@@ -4,10 +4,16 @@
   Just renamed the originals.
 :END:
 Let's combine the `eval` and `check` subcommands into a single `verify` subcommand that effectively performs terraform init followed by terraform verify.
-* Overengineered Guix value lowering
+* DONE Overengineered Guix value lowering
+:LOGBOOK:
+- State "DONE"       from              [2026-11-13 Fri 20:57]
+:END:
 * Module support?
 - Verify if needed
-* Destroy subcommand
+* DONE Destroy subcommand
+:LOGBOOK:
+- State "DONE"       from              [2026-11-13 Fri 20:57]
+:END:
 * DONE Template file support
 * DONE Unquoted identifiers in tofuix dadta
 :LOGBOOK:
@@ -25,5 +31,11 @@ Tofuix expressions such as `resource`, `data`, `output`, `variable`, etc should 
 It would be nice if the load path for Tofuix calls would be inherited from Guix:
 - automatically add all channels to the loadpath so that individual `-L channel-name` is not needed,
 - automatically add the subdirectory where the `infrastructure.scm` file lives (including the subdirectory then the file is named explicitly with `--file`).
-* Better READEM and docs
-* Port infra/ to Tofuix
+* DONE Better README
+:LOGBOOK:
+- State "DONE"       from              [2026-11-13 Fri 20:57]
+:END:
+* Better docs
+* Support for =--out= parameter for plans.
+* Ability to export config into HCL.
+* Ability to import config from HCL.
